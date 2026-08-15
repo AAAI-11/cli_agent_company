@@ -1,0 +1,34 @@
+# macOS
+.DS_Store
+
+# 编辑器 / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Python（PC 端服务）
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Node.js（若 PC 端改用 Node）
+node_modules/
+dist/
+npm-debug.log*
+
+# ESP-IDF（固件）
+build/
+sdkconfig.old
+dependencies.lock
+managed_components/
+*.elf
+*.map
+
+# 日志与临时文件
+*.log
+tmp/
+temp/
