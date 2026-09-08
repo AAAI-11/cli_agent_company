@@ -1,0 +1,9 @@
+# PetLink 自定义分区表（32MB flash）
+# v0.2 增补：factory 扩到 4MB（LVGL+字体），预留 2MB FAT 资产分区
+# 给 v0.3 的 PNG 素材槽（assets/<state>.png）——现在只占坑不挂载，
+# 免得 v0.3 再改分区表导致全擦重烧。
+# Name,   Type, SubType, Offset,  Size,     Flags
+nvs,      data, nvs,     0x9000,  0x6000,
+phy_init, data, phy,     0xf000,  0x1000,
+factory,  app,  factory, 0x10000, 0x400000,
+asset,    data, fat,     ,        0x200000,

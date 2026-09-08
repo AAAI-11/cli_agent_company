@@ -1,0 +1,111 @@
+menu "PetLink"
+
+    config PETLINK_GPIO_YES
+        int "YES 按键 GPIO 编号"
+        range 0 54
+        default 21
+        help
+            YES 实体键接的 GPIO（杜邦线临时接线阶段按实际脚改）。
+            接法：按键一脚接该 GPIO，另一脚接 GND，内部上拉。
+            短按 <600ms 放行，长按 ≥600ms 拒绝。
+            默认 GPIO21 = 40PIN 排针第 27 脚，隔壁 28 脚即 GND。
+            （曾用 GPIO39 已废弃：39 是 TF 卡 SDIO D0，未引出到排针。）
+
+    config PETLINK_GPIO_NO
+        int "NO 按键 GPIO 编号"
+        range 0 54
+        default 22
+        help
+            NO 实体键接的 GPIO（v0.1.1 增补：按下即拒，不看时长——
+            2026-09-03 真机两次没按准 600ms 长按，演示现场风险太大）。
+            接法同 YES：一脚接该 GPIO，另一脚接 GND（可与 YES 共用 GND）。
+            默认 GPIO22 = 40PIN 排针第 29 脚，与 28 脚 GND 紧邻。
+
+    menu "PetLink UI"
+
+        config PETLINK_UI_STAGE
+            int "UI 分阶段开发旋钮"
+            range 0 3
+            default 3
+            help
+                0=无屏模式（v0.1 行为，一键回退保险）。
+                1=纯 esp_lcd 彩条（点亮验证，不起协议任务）。
+                2=LVGL 接管显示静态测试页（不起协议任务）。
+                3=正式：屏幕 UI + 协议任务（默认）。
+
+        config PETLINK_UI_SELFTEST
+            bool "UI 六态轮播自检（每 2 秒切换一态，不收协议输入）"
+            default n
+            help
+                演示屏是否正常、中文标签是否缺字、动画是否在跑的
+                快速体检开关。验收后必须关掉。
+
+        config PETLINK_DSI_LDO_CHAN
+            int "MIPI DSI PHY 电源 LDO 通道号"
+            range 0 7
+            default 3
+            help
+                ESP32-P4 内部可调 LDO 通道（EV 板参考=3，微雪板
+                原理图未核实时先用默认，白屏/花屏再试 4）。
+
+        config PETLINK_DSI_LDO_MV
+            int "MIPI DSI PHY 电压（毫伏）"
+            range 1200 3300
+            default 2500
+            help
+                DPHY 需要独立的 2.5V 轨（EV 板参考值）。失败候选：
+                1800 / 2800。
+
+        config PETLINK_LCD_RST_GPIO
+            int "LCD 复位脚 GPIO（-1=无 RST 脚，走软复位）"
+            default -1
+            help
+                已核实（卖家模块图纸）：WLK2802MIPI-15P 的 FPC
+                无 RESET 引脚，保持 -1，组件自动走 SWRESET 软复位。
+
+        config PETLINK_UI_PNG
+            bool "PNG 素材槽（asset 分区 FAT + lodepng）"
+            default y
+            help
+                挂载 2MB asset 分区（FAT 长文件名），素材约定与
+                virtual_device/assets/README.md 完全一致：五态各一张
+                352×352 PNG（显示 176）。图在则替换矢量小狗（附件动画
+                保留），挂载失败/缺图/解码失败一律回退矢量——演示
+                永不断链。打包烧录：sh tools/mkassets.sh。
+
+    endmenu
+
+    menu "PetLink 语音输入"
+
+        config PETLINK_MIC_ENABLED
+            bool "板载 ES8311 麦克风录音（语音输入）"
+            default y
+            help
+                微雪 P4-WIFI6 板载模拟麦经 ES8311 codec（I²C 0x18）+
+                I2S STD 采集（espressif/esp_codec_dev 官方音频栈），
+                空闲态长按 YES 触发录音，audio 帧经 UART 上行给 daemon
+                转 whisper。关掉则长按 YES 只有拒绝语义。
+
+        config PETLINK_MIC_RECORD_MS
+            int "单次录音时长（毫秒）"
+            range 2000 30000
+            default 6000
+            help
+                16kHz×16bit = 32KB/s；6s ≈ 192KB（PSRAM 缓冲），
+                921600 波特率下上行约 3s。
+
+        config PETLINK_MIC_GAIN_DB
+            int "ES8311 麦克风模拟增益（dB）"
+            range 0 42
+            default 24
+            help
+                ES8311 PGA，驱动按 6dB 步进取整（0/6/…/42）。24dB 适合
+                30cm 近讲；远场可试 30/36。引脚（I²C SCL=8/SDA=7，
+                I2S MCLK=13/SCLK=12/LRCK=10/DIN=11）为板载固定布线，
+                硬编码在 mic.c——微雪 wiki「I2S Audio Demo」核实。
+                历史教训：v0.4.0/0.4.1 误信网上资料把 GPIO23/24 当
+                PDM 直连麦，两槽皆精确零——此板根本没有 PDM 麦。
+
+    endmenu
+
+endmenu

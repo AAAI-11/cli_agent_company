@@ -1,0 +1,45 @@
+menu "OLED 板测"
+
+    config OLEDT_I2C_SDA
+        int "OLED SDA GPIO"
+        range 0 54
+        default 7
+        help
+            微雪 ESP32-P4-WIFI6 的默认 I2C：SDA=GPIO7 / SCL=GPIO8（板载外部上拉）。
+            OLED 模块四线：VCC→3V3、GND→GND、SDA→GPIO7、SCL→GPIO8。
+
+    config OLEDT_I2C_SCL
+        int "OLED SCL GPIO"
+        range 0 54
+        default 8
+
+    config OLEDT_I2C_ADDR
+        hex "SSD1306 7 位地址"
+        default 0x3C
+        help
+            绝大多数模块是 0x3C（SA0 接地）；少数焊成高电平的是 0x3D。
+            拿不准就先烧录看自检的 I2C 扫描屏——上面会列出实际应答地址。
+
+    config OLEDT_I2C_CLK_HZ
+        int "I2C 时钟 (Hz)"
+        range 100000 1000000
+        default 400000
+        help
+            400kHz 稳妥；走线短、刷新率吃紧时可试 800000~1000000。
+
+    config OLEDT_OLED_FLIP
+        bool "屏幕上下翻转（倒装安装时开）"
+        default n
+
+    config OLEDT_GPIO_YES
+        int "YES 按键 GPIO 编号"
+        range 0 54
+        default 21
+        help
+            与正式固件同引脚同语义：一脚接该 GPIO 一脚接 GND，内部上拉。
+            短按 <600ms=放行/手动切态，长按 ≥600ms=拒绝/暂停 DEMO。
+            不接按键不影响其余测试项。
+            GPIO21 = 40PIN 排针第 27 脚，隔壁 28 脚即 GND。
+            （曾用 GPIO39 已废弃：39 是 TF 卡 SDIO D0，未引出到排针。）
+
+endmenu

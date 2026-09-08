@@ -1,0 +1,17 @@
+# ESP32-P4 + OLED 板测程序
+CONFIG_IDF_TARGET="esp32p4"
+
+# 控制台走 USB-Serial-JTAG：烧录/日志/PetLink 协议同一条 USB（与正式固件一致）
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# 主频拉满（I2C 整帧刷新 + 后续 LVGL 都要余量）
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_360=y
+
+# 板载 PSRAM（ESP32-P4NRW32 内置 32MB，HEX 模式专用引脚，ev-board 标准配置）
+# 不开的话 esp_psram 组件整个不参与编译，esp_psram_get_size 链接不到
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_HEX=y
+CONFIG_SPIRAM_SPEED_200M=y
+
+# 板载 32MB Flash（IDF 默认 2MB，会让 esp_flash_get_size 误报）
+CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y

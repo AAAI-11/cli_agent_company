@@ -82,7 +82,7 @@ git push -u origin feature/firmware
 | 你负责 | 分支名 | 对应目录 |
 |---|---|---|
 | 硬件 | `feature/hardware` | `03_硬件设计/` |
-| 固件 | `feature/firmware` | `04_固件开发/` |
+| 固件 | `feature/firmware` | `04_firmware/` |
 | PC 端服务 | `feature/host` | `05_PC端服务/` |
 | 文档 | `feature/docs` | 各文档 |
 

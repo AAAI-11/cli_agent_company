@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>虚拟设备 · CLI Agent 伴侣</title>
+  <link rel="stylesheet" href="/device/style.css">
+</head>
+<body>
+  <main class="rig">
+    <div class="device">
+      <div class="screen-top">
+        <span id="dot" class="dot off" title="连接状态"></span>
+        <span class="brand">AGENT ONLINE</span>
+        <span id="sess" class="sess">--</span>
+      </div>
+      <canvas id="screen" width="240" height="320"></canvas>
+      <div class="pad">
+        <button id="yes" type="button">YES</button>
+        <p class="hint">短按 = 允许 · 长按 = 拒绝</p>
+      </div>
+    </div>
+    <p class="foot" id="foot">正在连接 daemon…</p>
+  </main>
+  <script src="/device/pet.js"></script>
+</body>
+</html>

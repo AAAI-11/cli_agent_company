@@ -13,10 +13,9 @@
 
 | 分支 | 负责内容 |
 |---|---|
-| `feature/hardware` | `03_硬件设计`（原理图/PCB/BOM） |
-| `feature/firmware` | `04_固件开发`（ESP32 固件） |
-| `feature/host` | `05_PC端服务`（PC 端服务程序） |
-| `feature/docs` | 文档、README、`00_项目文档` 等 |
+| `feature/firmware` | `04_firmware/esp32p4_firmware`（ESP32-P4 固件） |
+| `feature/daemon` | `daemon/` + `virtual_device/`（Node daemon 与虚拟设备） |
+| `feature/docs` | 文档、README、需求文档、`00_项目文档` 等 |
 
 ## 二、第一次上手
 
@@ -45,7 +44,7 @@ git checkout -b feature/firmware
 # 4. 查看改动、提交
 git status
 git add .
-git commit -m "feat: 完成 MQTT 通信任务"
+git commit -m "feat: 六态宠物 UI 上屏"
 
 # 5. 推送到自己的分支（首次加 -u）
 git push -u origin feature/firmware
@@ -67,12 +66,12 @@ git pull
 
 | 前缀 | 含义 | 示例 |
 |---|---|---|
-| `feat:` | 新功能 | `feat: 增加按键外部中断` |
-| `fix:` | 修 bug | `fix: 修复 ST7789 花屏问题` |
-| `docs:` | 文档 | `docs: 补充引脚分配表` |
+| `feat:` | 新功能 | `feat: 六态宠物 UI 上屏` |
+| `fix:` | 修 bug | `fix: 修复 macOS 下误开 tty. 串口导致 TX 静默丢弃` |
+| `docs:` | 文档 | `docs: 补充 PetLink 协议判活语义` |
 | `chore:` | 杂项/配置 | `chore: 更新 .gitignore` |
-| `refactor:` | 重构（不改功能） | `refactor: 拆分 MQTT 任务` |
-| `test:` | 测试 | `test: 增加按键消抖用例` |
+| `refactor:` | 重构（不改功能） | `refactor: 拆分 hooks 归一化模块` |
+| `test:` | 测试 | `test: 增加心跳防乒乓回归用例` |
 
 ## 五、常见问题
 
@@ -114,7 +113,11 @@ git push origin --delete feature/xxx   # 删远程分支（可选）
 
 项目根目录 `README.md` 有完整说明。常用：
 
-- `03_硬件设计/` —— 原理图、PCB、BOM、数据手册
-- `04_固件开发/esp32s3_firmware/` —— ESP-IDF 固件（main/components/ota）
-- `05_PC端服务/` —— agent_monitor、mqtt_broker、asr_service、device_registry
-- `00_项目文档/` —— 开题报告、需求、会议纪要
+- `daemon/` —— Node daemon（hooks 归一化 + 设备链路 + permission 仲裁）
+- `virtual_device/` —— 浏览器虚拟设备（纯静态）
+- `04_firmware/esp32p4_firmware/` —— ESP32-P4 固件（ESP-IDF v6.1 + LVGL）
+- `docs/protocol.md` —— PetLink v1 协议规范
+- `01_需求与方案/` —— 宪法：需求说明文档 v3.0
+
+**提交前自查**：固件改了就跑 `sh 04_firmware/esp32p4_firmware/test/run.sh`（38 项），
+daemon 改了就跑 `cd daemon && npm run smoke`（15 项）——全绿再提 PR。

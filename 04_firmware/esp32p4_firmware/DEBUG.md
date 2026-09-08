@@ -1,0 +1,315 @@
+# petlink-fw 调试清单（v0.3 真机验证）
+
+> 每步含：指令 → 预期 → 失败时怎么办。按顺序打勾。
+> 终端布局：**终端 A** 跑 daemon（长期挂着），**终端 B** 干活（烧录/测试）。
+
+---
+
+## 0. 前置认知
+
+- 板子 USB 口：`/dev/cu.usbmodem5B910634541`（名字换了就 `ls /dev/cu.usbmodem*` 现查）
+- **该口实情**：USB-C → 板载 CH343 桥接芯片 → P4 的 UART0（vid=1a86 WCH，不是乐鑫原生 USB；
+  P4 的 USB-Serial-JTAG 在这块微雪板上没引出）。固件控制台与 PetLink 同走 UART0@115200
+- 本板芯片版本 v1.3（sdkconfig.defaults 已配 REV_MIN_100，换 v3.x 芯片的板要改回）
+- 本板设备号：`p4-e396bd`（MAC 尾号，日志里认它）
+- ⚠️ **zsh 不认行内 `#` 注释**（会当参数执行）——本文档命令块都不带行内注释，整块可粘
+- YES 键接线：**GPIO21 = 40pin 排针第 27 脚，按键另一脚接第 28 脚 GND（两脚上下相邻）**
+  ⚠️ 排针是 **Pico 式两竖排**：左排从上到下 = 第 1~20 脚，右排从上到下 = 第 21~40 脚，
+  **不是树莓派奇偶双列**——按奇偶列数会差一整排（2026-09-02 按键"失灵"两小时的元凶）
+  右排从上往下：VBUS(21)⚠️5V、VSYS(22)⚠️、GND(23)、EN(24)、3V3(25)、GPIO20(26)、**GPIO21(27)**、**GND(28)**、GPIO22(29)、RUN(30)
+  导航口诀：**右排找丝印 3V3，往下数第 2 个 = GPIO21，紧挨它下面 = GND**（别数反方向戳到顶部电源脚）
+  ⚠️ 排针物理脚号 ≠ GPIO 编号：左排第 7/8 脚是 GPIO28/GND；I2C 丝印 SDA=GPIO7(17脚)、SCL=GPIO8(16脚)，别拿错
+- NO 键接线（v0.1.1）：**GPIO22 = 排针第 29 脚（GPIO21(27) 再往下：28 是 GND、29 就是它），
+  按键另一脚接 GND（可与 YES 共用第 28 脚）**——按下即 deny，不用掐时长
+
+## 1. 起 daemon（终端 A）
+
+```bash
+cd ~/project_lh/cli_agent_company/daemon
+npm start
+```
+
+✅ 预期：`HTTP 监听 :7331`、`WsLink 监听 :7332`、`TcpLink 监听 :7333`、`UsbCdcLink 就绪待插`
+❌ 端口被占 → 有旧 daemon 没死：`pkill -f "node src/server.js"` 后重跑
+
+## 2. 不碰硬件的自检（任何时候可跑）
+
+```bash
+# 固件协议核心 + ui_map 六态映射 共 38 项单测
+cd ~/project_lh/cli_agent_company/04_firmware/esp32p4_firmware && sh test/run.sh
+# daemon 全链路 15 项冒烟（独立端口 7391-93，不撞正在跑的 daemon）
+cd ~/project_lh/cli_agent_company/daemon && node test/smoke.js
+```
+
+✅ 预期：`33/33`、`15/15`
+
+## 3. 烧录（终端 B）
+
+依次执行（每条独立一行，激活 IDF → 让 daemon 松口 → 烧录并看日志）：
+
+```bash
+cd ~/project_lh/cli_agent_company/04_firmware/esp32p4_firmware
+```
+```bash
+. ~/.espressif/v6.1/esp-idf/export.sh
+```
+```bash
+curl -X POST http://127.0.0.1:7331/usb/pause
+```
+```bash
+idf.py -p /dev/cu.usbmodem5B910634541 flash monitor
+```
+
+✅ 预期 monitor 里看到（几秒内）：
+```
+I (xxx) petlink: PetLink v1 已启动 device=p4-e396bd
+```
+看够了按 `Ctrl+]` 退出 monitor，然后：
+```bash
+curl -X POST http://127.0.0.1:7331/usb/resume
+```
+
+❌ `Resource busy` → daemon 没松口：回终端 A 确认它收到 pause；不行就 `pkill` 它，烧完再 `npm start`
+❌ 编译报错 → 贴给我
+❌ monitor 里反复重启 → 把 monitor 输出整段贴我
+
+## 4. 验证握手（真机会师时刻）
+
+看**终端 A**（daemon）日志：
+
+✅ 预期依次出现：
+```
+UsbCdcLink 连接 /dev/cu.usbmodem5B910634541（Espressif）@115200
+[cdc#1] 握手完成 → p4-e396bd (fw=0.2.0 hw=p4-board)
+```
+
+再确认识别：
+```bash
+curl -s localhost:7331/status | python3 -m json.tool | grep -A5 devices
+```
+✅ 预期 devices 里有 `"id": "p4-e396bd"`
+
+❌ CDC 连了但没握手 → 固件没发 hello：回第 3 步看 monitor；或看"附：监听原始串口"
+❌ 连 CDC 连接都没有 → `ls /dev/cu.usbmodem*` 换数据线/USB 口
+
+## 5. 浏览器虚拟设备同步
+
+打开 http://localhost:7331/device （Cmd+Shift+R 硬刷新）
+
+✅ 预期：右上角绿点 `daemon 已连接 · 7332 · virtual-1`，宠物正常显示
+（此刻实体板也在链路里——daemon 对所有设备广播，一实一虚同源）
+
+## 6. Claude Code 五态驱动（最直观的演示）
+
+终端 B 开一个新的 Claude Code 会话，随便让它干活：
+```bash
+mkdir -p /tmp/petlink_demo && cd /tmp/petlink_demo && claude
+# 输入：帮我看看这个目录里有什么文件，然后建一个 test.txt
+```
+
+✅ 预期：浏览器宠物（和将来板子上的屏）随终端状态切换：
+`思考中 → 干活中 → 完成`（有授权请求时闪 `等你拍板`）
+
+## 7. TCP 回环手动逗 daemon（理解协议最快方式）
+
+```bash
+nc localhost 7333
+```
+然后手打这些行（每行回车，注意要单行完整 JSON）：
+```
+{"ver":1,"type":"hello","device":"myhand-1","fw":"0.0.1","hw":"human","caps":["button"]}
+{"ver":1,"type":"heartbeat","uptime_ms":100}
+{"ver":1,"type":"button","key":"yes","event":"short"}
+```
+✅ 预期：每发一条，daemon 会回一条（hello_ok / 带 reply:true 的心跳应答）；
+`Ctrl+C` 退出。这就是协议的全部——给学生演示也用这个。
+
+## 8. 断线重连（健壮性）
+
+拔掉 USB 线 → 等 3 秒 → 插回。
+
+✅ 预期：终端 A 出现 `CDC ... 断开` 然后自动 `UsbCdcLink 连接 ...` + 重新握手，不需要人工干预。
+（浏览器标签挂后台 60 秒再切回来也应自动恢复——90 秒判活窗口覆盖）
+
+## 9. YES 实体键（创新点 F03 闭环）
+
+**先接线**：YES——GPIO21（排针 27 脚）↔ 按键一脚，GND（28 脚）↔ 另一脚；
+NO（v0.1.1）——GPIO22（排针 29 脚）↔ 另一颗按键一脚，GND 共用 28 脚。
+
+**测试 a——模拟授权（不需要真 Claude 会话）**，终端 B：
+```bash
+curl -X POST localhost:7331/permission -H 'Content-Type: application/json' \
+  -d '{"session_id":"manual-test","tool":"Bash","prompt":"echo hi","timeout_ms":20000}'
+```
+这条会挂起等按键——**20 秒内短按板上 YES 键**：
+✅ 预期 curl 立刻返回 `"behavior":"allow"`；终端 A 日志 `[button] ... 已消费（permission 仲裁）`
+按板上 NO 键再试一次 → `"behavior":"deny"`（v0.1.1，不用掐时长）
+长按 YES ≥600ms 再试一次 → 同样 `"behavior":"deny"`
+
+**测试 b——真实 Claude 授权**：终端 B 跑 `claude`，让它执行一条需要授权的命令（如删文件），
+宠物变「等你拍板」时按板上键。
+
+**F03 仲裁矩阵（2026-09-05 全格真板验完，deny 两轮收官）**：
+
+| 按键 | HTTP 返回 | daemon 日志 |
+|---|---|---|
+| YES 短按 <600ms | `{"behavior":"allow"}` | `key=yes event=short → 已消费` |
+| NO 按下即松 | `{"behavior":"deny"}`，message=用户按下实体 NO 键 | `key=no event=short → 已消费` |
+| YES 长按 ≥600ms | `{"behavior":"deny"}`，message=用户长按 Yes 键拒绝 | `key=yes event=long → 已消费` |
+| 超时不按 | 空 body（无决策，回落终端弹窗） | `无决策（timeout）→ 回落终端弹窗` |
+
+（时序技巧：curl 用 `run_in_background` 挂起 + 短 timeout_ms，人再按键，窗口对得上；
+松手抖动的第二帧在无 waiter 时被正确丢弃——顺手验过的边界）
+
+❌ 按键没反应 → ① 脚位对不对（27 脚不是丝印 GPIO27！）；② 用第 7 步的 nc 发 button 帧排除固件问题；③ monitor 里看有没有 `YES 短按` 日志（有日志=固件好，问题在链路；没日志=接线/GPIO 问题）
+
+## 10. 回归：心跳安静（上午修的 bug）
+
+让链路挂着 5 分钟，看终端 A：
+
+✅ 预期：**没有任何 heartbeat 行**（已静默），只有握手/状态/按键事件。
+❌ 心跳刷屏 → daemon 或固件有一边是旧代码，两边都重启成最新。
+
+## 11. v0.2 屏幕链路观察（烧录后 monitor 里按序出现）
+
+STAGE 由 `idf.py menuconfig → PetLink UI → UI 分阶段开发旋钮` 控制（默认 3）。
+
+✅ 预期（STAGE=3 正式模式）依次：
+```
+I (xxx) disp_dsi: DSI PHY 已上电（LDO ch3 @2500mV）
+I (xxx) st7701_mipi: LCD ID: FF FF FF        ← 正常！此屏 LP 模式不支持回读
+I (xxx) disp_dsi: ST7701 480x640 init OK（WLK2802MIPI-15P 卖家序列，1 lane）
+I (xxx) pet_ui: pet_ui 挂载完成（640x480 横屏 → 480x640 raster 转置 flush，draw buf 64 行×2，六态就绪）
+I (xxx) petlink: PetLink v1 已启动 device=p4-e396bd
+```
+
+- 屏幕常亮深底 + 灰胶囊「正在连接」呼吸 → daemon 起来后进六态
+- **横屏**：模块须物理**顺时针转 90°** 安装（代码按此方向转置）；若现场装成了
+  逆时针（画面镜像/颠倒），改 `main/pet_ui.c` 的 `PET_UI_ROT_CW` 为 0 重烧
+- 状态切换度量：`[ui] xxx`（协议收到）与 `pet_ui: state=xxx applied=Nms`（上屏）配对，
+  实测 N ≤ 40ms（宪法预算 500ms）
+- **六态轮播自检**：`sdkconfig` 里 `CONFIG_PETLINK_UI_SELFTEST=y` 重烧，
+  六态每 2 秒轮换（thinking→working→waiting_confirm→done→error→connecting），验完关掉
+
+❌ 全黑但侧看有白光边 → 背光在（常亮电路），面板没吃到流：FFC 方向/接触、
+   或参数被改动（正确值见 `main/disp_dsi.c` 头注释）
+❌ `esp_lcd_new_dsi_bus` 报错 → lane 速率/数目被改动（1 lane @ 700Mbps 是验证值）
+
+## 12. v0.3 PNG 素材链路观察
+
+✅ 开机日志（asset 分区在位、五图齐）：
+```
+I (xxx) pet_assets: asset 挂载完成：PNG 6/6 张就位，预解码 5 张入缓存（缺/败的态走矢量）
+```
+（6/6 = 六个状态槽（CONNECTING 复用 thinking 图）全命中；预解码 5 = 五张唯一图全部入缓存）
+
+❌ `PNG 0/6 张就位` 且挂载"成功" → stat 传了相对路径：IDF VFS 按注册前缀
+   `/asset` 匹配，相对路径匹配不到任何前缀恒 ENOENT。必须 `/asset/xxx.png` 绝对路径
+   （`pet_assets.c` 挂载段，2026-09-05 踩过——这个 bug 的阴险处：**UI 一切正常**，
+   只是全程矢量兜底，视觉上无差别）
+❌ `6/6 张就位` 但 `预解码 0 张` → 解码器 open 失败三连坑（每层都静默回退矢量）：
+   1. `LV_USE_CLIB_MALLOC` 未开 → lv_malloc 走内置 TLSF，池子 `LV_MEM_SIZE` 64KB，
+      494KB 解码缓冲必然分配失败
+   2. `LV_CACHE_DEF_SIZE` 按字节不按条目（lv_cache_class_lru_rb_size），
+      设 8 = 8 字节，任何图都进不了缓存且 decoder_open 返回 INVALID
+   3. lodepng 的文件 IO 走 lv_fs（"A:" 盘符）没问题；但 `lv_image_decoder_dsc_t`
+      完整定义在私有头 `draw/lv_image_decoder_private.h`，公开头只有前向声明
+❌ 状态切换 applied ~500ms 贴死预算 → lodepng 解码发生在**渲染期**
+   （lv_draw_image → lv_image_decoder_open），解码阻塞 LVGL 主循环。预解码在开机
+   完成即免疫；度量脚本见 `/tmp/measure_v03.py` 思路（daemon 角色扮演 + F/C 分组）
+❌ `挂载失败` 日志 → asset 分区没烧或格式不对：`sh tools/mkassets.sh` 重烧
+
+**度量口径（2026-09-05 真机，修复后）**：首显 F max 75ms / avg 44ms，
+缓存 C max 87ms / avg 43ms，预算 500ms PASS。开机首帧 `state=connecting
+applied=521ms` 属正常——首帧全屏渲染只在 boot 期发生，不在预算内。
+
+---
+
+## 13. v0.4 语音输入调试记录（PDM 悬案 → ES8311 正路）
+
+三天的完整破案链，教训密度高，全程留档：
+
+**第一天（v0.4.0）**：按网上资料把板载麦当 PDM 直连（DIN=GPIO23/CLK=GPIO24）。
+真机录音 6s → whisper 输出字幕组署名幻觉（近静音输入的典型症状）。wav 分析：
+0.35s 削顶瞬态 + 5.6s **精确零**。增益 amplify 1→12 只改变瞬态幅度。
+
+**第二天（v0.4.1）**：怀疑 L/R select 拉高，加 `PETLINK_MIC_SLOT_RIGHT` 翻槽。
+波形**一模一样**（0.35s 瞬态 + 5583 非零样本 + 之后 rms 0.0）。差分证据定案：
+增益旋钮有效（数字路径活着）、槽位旋钮无效（DIN 线恒定电平）→ **麦克风根本
+没在驱动 DIN 线，引脚接线根本不对**。
+
+**第三天（v0.4.2）**：查微雪官方 wiki（查硬件数值不查代码，干净室合规）——
+板上根本没有 PDM 麦：**模拟麦 → ES8311 codec（I²C 0x18）→ I2S STD**。
+PDM 23/24 是张冠李戴（疑似他板资料）。改造：
+
+- 独立 `es8311` 组件 v1.0.0 仍是 legacy I2C API（IDF6 已删 `driver/i2c.h`）→
+  换 `espressif/esp_codec_dev` 1.6.2（esp-box/P4 EV 板官方栈）
+- 引脚硬编码 `mic.c`（板载布线同 DSI lanes 处理）：I²C SCL=8/SDA=7，
+  I2S MCLK=13/SCLK=12/LRCK=10/DIN(ASDOUT)=11；DSDIN=9/PA=53 属放音不碰
+- 先 `i2c_master_probe` 探 codec，无应答直接拒录（不再录一堆零上传）
+- 增益 Kconfig `PETLINK_MIC_GAIN_DB`（ES8311 PGA，6dB 步进，默认 24）
+
+**验收（2026-09-08 真机）**：转写逐字命中「帮我看看当前目录下有哪些文件」；
+wav 全程非零，语音段 rms 6949（21% 满幅无削顶）、环境底噪 ~2%——与 PDM 时代
+的精确零形成判决性对比。端到端：长按 YES → 6s 录音 → 107 audio 帧 →
+whisper 转写 → tmux 注入，转写耗时 <1s。
+
+### 同日两个伴生 bug（都卡过语音测试）
+
+1. **授权超时残留态（daemon 侧）**：permission 超时回落终端弹窗（空 body，
+   Claude Code 语义正确）但没通知设备——设备永远停在"等待授权"（真机卡过
+   13 分钟），期间长按 YES 全被拒绝语义吞掉、语音输入被 `voice_armed()` 的
+   waiting 门控拦死。修：`daemon/src/hooks.js` 超时分支补发 thinking 状态。
+2. **看门狗 5s 一刷（固件侧）**：`CONFIG_FREERTOS_HZ=100` 下
+   `pdMS_TO_TICKS(<10)==0`，lvgl 任务 `vTaskDelay(0)` 只让出不睡眠，重动画
+   时段把 IDLE0 饿死。修：`pet_ui.c` 延时下限 10ms（1 tick 保证真睡）。
+
+---
+
+## 附 A：监听原始串口（不污染控制线）
+
+```bash
+cd ~/project_lh/cli_agent_company/daemon && node -e "
+const { SerialPort } = require('serialport');
+const p = new SerialPort({ path: '/dev/cu.usbmodem5B910634541', baudRate: 115200, autoOpen: false, dtr: false, rts: false });
+p.open(() => console.log('[监听中，可拔插 USB/按 RESET]'));
+p.on('data', (d) => process.stdout.write(d.toString('utf8').replace(/[^\x20-\x7e\n\r\t]/g, '·')));
+"
+```
+（`dtr:false, rts:false` 很关键——默认开法会把芯片拽进下载模式，看到的全是假象）
+
+**抓完整开机日志**（monitor 常开会漏掉前几百毫秒）：pyserial 先设 `dtr/rts=False`
+再 open，然后**脉冲 RTS**（True 100ms → False）复位；若误见
+`boot:0x307 (DOWNLOAD)` 说明 DTR 把 BOOT 拽住了，改脉冲 RTS 即可。
+`parttool.py read_partition` 在本机挂死不动——直接读 flash：
+
+```bash
+python3 -m esptool --chip esp32p4 -p /dev/cu.usbmodem5B910634541 -b 460800 read_flash 0x410000 16384 /tmp/asset_head.bin
+```
+
+## 附 B：常见故障速查
+
+| 症状 | 原因 | 解法 |
+|---|---|---|
+| `Resource busy` | daemon 占着串口 | `/usb/pause` 或 pkill daemon |
+| `requires chip revision [v3.1-v3.99]` | IDF 默认最低版本 v3.1，本板 v1.3 | sdkconfig.defaults 已修（REV_LESS_V3 + REV_MIN_100），确认后重烧 |
+| 烧录后 `/dev/cu.usbmodem*` 整个消失 | 串口被以断言 DTR/RTS 方式打开过，macOS 丢了设备 | 拔插 USB 即恢复；daemon 已修不会再犯 |
+| 连上就断、约 3s 一循环、只收到 heartbeat | 孤儿设备死锁：设备还在上个 daemon 的 90s 判活窗内发心跳，daemon 回 error 又给它"续命" | 两侧已修（daemon 静默容忍 + 固件判活只认 hello_ok/heartbeat/state），重启 daemon ≤90s 自愈 |
+| 烧完黑屏不启动 | BOOT 被按住/短路 | 松开 BOOT 重新上电 |
+| daemon 没有任何 CDC 日志 | 口名变了/线坏 | `ls /dev/cu.usbmodem*` 现查替换 |
+| CDC 连了不握手 | 固件 hello 没发出 | 附 A 看原始流 + monitor 看日志 |
+| 按键无响应 | 脚位/接线 | 见第 9 步排查三连 |
+| 按键按下完全无帧（raw 听只有心跳） | 40pin 是两竖排（左 1-20 / 右 21-40），按树莓派奇偶列数→数错排 | 第 0 步导航口诀：右排丝印 3V3 往下数第 2 个 |
+| 心跳刷屏 | 某端旧代码 | 两端都重启到最新 |
+| VS Code 里编译中文路径报错 | IDF 限制 | 固件目录必须全 ASCII（`04_firmware`） |
+| 屏全黑、侧看有白光边 | 背光常亮电路正常，面板没收到 init/视频流 | FFC 方向与接触；参数须为 `disp_dsi.c` 头注释的卖家验证值（1 lane@700 + 25MHz） |
+| `LCD ID: FF FF FF` | 此屏 LP 模式不支持回读 | 无需处理（组件只告警不中断） |
+| 屏上图形缺一角/只剩一个点 | LVGL 把子件**裁剪到父容器边界框内**——容器建太小 | 容器必须罩住全部子件（见 `pet_ui.c` DOG_BBOX 注释，2026-09-04 真机教训） |
+| 满屏乱点/斜条纹 | `draw_bitmap` 要求输入按**脏区宽紧凑排列**——喂全幅级冲切片（行距 480≠脏区宽）会被斜读 | flush_cb 转置进 packed 草稿缓冲再上屏（`pet_ui.c` s_rot，2026-09-04 真机教训） |
+| 中文显示 `?` | 字体子集缺字（v0.3 起为 ~500 字折中集，缺字显示 `?` 不乱码） | 重跑 README 的 lv_font_conv 命令（symbols 与 `PET_FONT_SYMBOLS` 逐字一致） |
+| 新增 .c 编译进空目标（链接报 undefined 或整段代码"没生效"） | `#if CONFIG_*` 写在任何 include 之前——sdkconfig 宏尚未引入，整个 TU 被预处理成空 | 每个 touch CONFIG 的 .c/.h 第一行 `#include "sdkconfig.h"`（pet_assets.c 踩过，2026-09-04） |
+| PNG 槽全程不工作但 UI 无异常 | 见第 12 节：stat 相对路径 / CLIB_MALLOC / 缓存字节三连坑，全部静默回退矢量 | 按第 12 节逐条核对 sdkconfig 三件套 + 开机日志 |
+| 颜色整体红蓝对调 | RGB/BGR 顺序 | `disp_dsi.c` 里 `rgb_ele_order` 换 `LCD_RGB_ELEMENT_ORDER_BGR`（当前真机无此症） |
+| 录音全零 / whisper 幻觉出字幕署名 | 板上无 PDM 麦（v0.4.0/0.4.1 误信网上资料） | v0.4.2 已改 ES8311 codec 正路（第 13 节）；若 `I2C 上探不到 ES8311` 看 SCL=8/SDA=7 是否被占 |
+| 设备长时间卡"等待授权"，YES/语音全无响应 | daemon permission 超时回落后没清设备态（已修） | daemon `hooks.js` 超时分支补发 thinking；若再遇重启 daemon 即愈 |
+| 看门狗 task watchdog 5s 一刷 | lvgl `vTaskDelay(0)` 饿死 IDLE0（100Hz tick 下 ms<10 的延时全是 0） | `pet_ui.c` 延时下限 10ms（已修） |

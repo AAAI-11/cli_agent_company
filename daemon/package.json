@@ -1,0 +1,20 @@
+{
+  "name": "companion-daemon",
+  "version": "0.2.0",
+  "description": "CLI Agent 伴侣桌面 daemon：Claude Code hooks 状态归一化 + PetLink v1 设备链路 + 语音输入输出 + 会话统计",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "smoke": "node test/smoke.js",
+    "hooks:preview": "node src/install-hooks.js --dry-run",
+    "hooks:install": "node src/install-hooks.js",
+    "hooks:uninstall": "node src/install-hooks.js --uninstall"
+  },
+  "dependencies": {
+    "serialport": "^13.0.0",
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

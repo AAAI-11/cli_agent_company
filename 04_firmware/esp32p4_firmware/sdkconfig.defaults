@@ -1,0 +1,58 @@
+# ESP32-P4 + PetLink v0.1
+CONFIG_IDF_TARGET="esp32p4"
+
+# 控制台走 UART0：板上 USB-C 实为 CH343 桥接 → UART0（微雪 P4-WIFI6 布线，
+# P4 原生 USB-Serial-JTAG 未引出到任何接口，2026-09-02 实测 vid=1a86 才发现）。
+# 日志与协议帧在同一条流上交错——daemon 对坏行静默丢弃，互不影响。
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+
+# 主频拉满：状态机+UI 都很轻，但 MIPI 屏点亮后 LVGL 需要余量
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_360=y
+
+# 板载 PSRAM（ESP32-P4NRW32 内置 32MB，HEX 模式专用引脚，ev-board 标准配置）
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_HEX=y
+CONFIG_SPIRAM_SPEED_200M=y
+
+# 板载 32MB Flash（IDF 默认 2MB，会让 esp_flash_get_size 误报）
+CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y
+
+# 本板芯片是 P4 v1.3：IDF 6.1 默认只支持 v3.1+，烧录时会被 esptool 拒
+# （bootloader requires chip revision [v3.1-v3.99]）。v1.x 与 v3.x 硬件差异大、
+# 二选一；这里选 v1.0 起步（覆盖本板 v1.3）。换 v3.x 板子时删掉这两行。
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_100=y
+
+# ---------- v0.2：MIPI-DSI 屏 + LVGL ----------
+# 与本地官方例程 sdkconfig.defaults 对齐（observer/sysmon/perf_monitor 刻意不开，
+# 调帧率时临时打开 CONFIG_LV_USE_PERF_MONITOR）
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+CONFIG_LV_CONF_SKIP=y
+CONFIG_LV_COLOR_DEPTH_24=y
+CONFIG_LV_FONT_MONTSERRAT_16=y
+CONFIG_LV_FONT_MONTSERRAT_20=y
+
+# 自定义分区表：factory 4MB（LVGL+字体）+ 2MB FAT 资产坑（v0.3 PNG 槽，暂不挂载）
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILE="partitions.csv"
+
+
+# ---------- v0.3：PNG 素材槽（asset 分区 + lodepng + FS 盘符 A） ----------
+CONFIG_LV_USE_FS_POSIX=y
+CONFIG_LV_FS_POSIX_LETTER=65
+CONFIG_LV_FS_POSIX_PATH="/asset"
+CONFIG_LV_USE_LODEPNG=y
+/* PNG 解码缓冲（352² ARGB8888 ≈494KB）远超内置 TLSF 池（LV_MEM_SIZE 64KB），
+ * 必须走系统 malloc 才能落 PSRAM（SPIRAM_USE_MALLOC）。 */
+CONFIG_LV_USE_CLIB_MALLOC=y
+/* 注意：LV_CACHE_DEF_SIZE 单位是字节（lrw_rb_size 按条目大小逐字节扣减），
+ * 不是条目数！352×352 ARGB8888 ≈ 494KB/张，5 张唯一图 ≈ 2.5MB → 留 3MB。 */
+CONFIG_LV_CACHE_DEF_SIZE=3145728
+
+# ---------- v0.4：语音输入（UART 带宽升级） ----------
+# 16kHz×16bit 单声道 PCM = 32KB/s；115200 只有 ~11.5KB/s 净载——console 波特率
+# 拉到 921600（CH343 支持，日志与协议帧同流照旧，坏行由 daemon 丢弃）。
+# 注意：ESP_CONSOLE_UART_BAUDRATE 只有在 CUSTOM 模式下才有 Kconfig prompt，
+# 单写 BAUDRATE 会被 kconfgen 在重新生成时打回默认 115200（2026-09-07 踩过）。
+CONFIG_ESP_CONSOLE_UART_CUSTOM=y
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=921600
