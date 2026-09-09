@@ -220,7 +220,7 @@ static lv_obj_t *s_topbar;      /* 4px 状态条（pet.js fillRect(0,0,W,4)） *
 static lv_obj_t *s_lbl_title;
 static lv_obj_t *s_lbl_session;
 static lv_obj_t *s_bubble[PL_MAX_BUBBLES]; /* F02R 会话气泡行（顶栏右侧下方） */
-static lv_obj_t *s_lbl_tokens;             /* F15 token 底行（底部居中小字） */
+static lv_obj_t *s_lbl_tokens;             /* F15 token 行（顶栏标题下方小字） */
 static lv_obj_t *s_halo;        /* 状态色光晕（径向渐变的实心近似） */
 static lv_obj_t *s_dog;         /* 宠物容器：原点=中心，子件用相对负坐标 */
 static lv_obj_t *s_lbl_state;   /* 底部状态胶囊 */
@@ -269,13 +269,15 @@ static void build_page(lv_display_t *disp)
     lv_obj_add_flag(s_bubble[i], LV_OBJ_FLAG_HIDDEN);
   }
 
-  /* F15 token 底行：底部居中常驻小字（纯 ASCII，Montserrat 14），
+  /* F15 token 行：标题下方常驻小字（纯 ASCII，Montserrat 14），与右侧
+   * 气泡行同高（行中心 52）。不放底部——那里住着状态胶囊和 text 短标签，
+   * BOTTOM_MID 会整个压上去（2026-09-09 真机"方块+token"乱码即此）。
    * 帧未带 tokens 字段时隐藏（旧 daemon / 会话无流水） */
   s_lbl_tokens = lv_label_create(scr);
   lv_label_set_text(s_lbl_tokens, "");
   lv_obj_set_style_text_color(s_lbl_tokens, lv_color_hex(COL_TOPTEXT), 0);
   lv_obj_set_style_text_font(s_lbl_tokens, &lv_font_montserrat_14, 0);
-  lv_obj_align(s_lbl_tokens, LV_ALIGN_BOTTOM_MID, 0, -8);
+  lv_obj_align(s_lbl_tokens, LV_ALIGN_TOP_LEFT, 12, 44);
   lv_obj_add_flag(s_lbl_tokens, LV_OBJ_FLAG_HIDDEN);
 
   /* 光晕：状态色低不透明度大圆（pet.js 径向渐变的实心近似） */

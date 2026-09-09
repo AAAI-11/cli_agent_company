@@ -30,8 +30,8 @@ cd daemon && npm install && npm start    # 起 daemon（macOS 需已装 Node 18+
 | 目录 | 内容 | 测试 |
 |---|---|---|
 | `daemon/` | Node daemon：hooks 归一化 + USB/WS/TCP 链路 + permission 仲裁 + tmux 注入 + whisper 语音输入 + say 语音播报 + 会话统计 + 多会话焦点管理 + token 消耗统计 | `npm run smoke` 28 项 |
-| `virtual_device/` | 浏览器虚拟设备（纯静态，与实体板同协议同状态机、同款会话气泡与 token 底行） | daemon smoke 内联覆盖 |
-| `04_firmware/esp32p4_firmware/` | ESP32-P4 固件（ESP-IDF v6.1 + LVGL)：PetLink 协议、六态 UI、PNG 素材槽、ES8311 录音、多会话气泡、token 底行 | `sh test/run.sh` 56 项宿主单测 |
+| `virtual_device/` | 浏览器虚拟设备（纯静态，与实体板同协议同状态机、同款会话气泡与 token 行） | daemon smoke 内联覆盖 |
+| `04_firmware/esp32p4_firmware/` | ESP32-P4 固件（ESP-IDF v6.1 + LVGL)：PetLink 协议、六态 UI、PNG 素材槽、ES8311 录音、多会话气泡、token 行 | `sh test/run.sh` 56 项宿主单测 |
 | `docs/protocol.md` | PetLink v1 协议规范（帧格式/握手/心跳/判活/防乒乓） | 与固件单测同源 |
 | `04_firmware/oled_board_test/` | 早期 OLED 板验证程序（历史存档） | — |
 

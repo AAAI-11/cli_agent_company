@@ -4,7 +4,7 @@ PetLink v1 设备端。**v0.6.0 token 可视版**：串口链路（**921600**）
 MIPI-DSI 六态宠物 UI + 文本上屏 + 五态 PNG 素材槽 + 板载 ES8311 麦克风录音上行 +
 **多会话气泡行**（state 帧可选 `bubbles` 字段：各会话状态色圆点、焦点加大加白环；
 空闲态 NO 键循环切换焦点——F02R，协议 §3.4）+
-**token 底行**（state 帧可选 `tokens` 字段：焦点会话 ctx/tot 常驻小字——F15，协议 §3.4）。
+**token 行**（state 帧可选 `tokens` 字段：焦点会话 ctx/tot 顶栏标题下方常驻小字——F15，协议 §3.4）。
 v0.3 里程碑（2026-09-05 真机闭环）：状态切换→上屏实测首显 max 75ms / 缓存命中
 max 87ms，宪法预算 500ms。
 驱动基底 = 乐鑫官方示例 + espressif 组件（Apache-2.0，宪法 L109）；屏幕参数走卖家
@@ -27,7 +27,7 @@ esp32p4_firmware/
 │   ├── mic.h/.c            # ES8311 codec 录音任务：esp_codec_dev → PSRAM 缓冲 → audio 帧上行（v0.4）
 │   ├── main.c              # IDF 接线：UART0 收发（TX 互斥锁）+ 按键 + 语音触发 + STAGE 分派
 │   ├── disp_dsi.h/.c       # MIPI-DSI 点屏：WLK2802MIPI-15P 卖家参数（见文件头注释）
-│   ├── pet_ui.h/.c         # LVGL 六态宠物：矢量小狗 + 动画 + 多会话气泡行 + token 底行（与 pet.js 同源）
+│   ├── pet_ui.h/.c         # LVGL 六态宠物：矢量小狗 + 动画 + 多会话气泡行 + token 行（与 pet.js 同源）
 │   ├── pet_assets.h/.c     # 五态 PNG 素材槽：FAT 挂载 + 预解码 + 矢量兜底（v0.3）
 │   ├── ui_map.h/.c         # 状态→样式映射：纯 C 查表（宿主可测，颜色与 pet.js 同源）
 │   ├── font_pet_32.c       # 中文字体子集（~500 字，重生成命令见文件头注释）
@@ -226,6 +226,6 @@ sh test/run.sh    # 56 项：编码/分帧/握手/防乒乓/五态/容错/判活
 - [x] v0.5.0 多会话气泡（F02R，2026-09-09）：state 帧可选 `bubbles` 数组 →
       顶栏气泡行；daemon 焦点管理（waiting_confirm 抢占 / NO 键空闲切换），
       虚拟设备同款渲染——一实一虚同源
-- [x] v0.6.0 token 底行（F15，2026-09-09）：state 帧可选 `tokens` 字段 →
-      底部常驻 `ctx 45.1k / tot 1.2M` 小字（焦点会话口径，daemon 增量解析
+- [x] v0.6.0 token 行（F15，2026-09-09）：state 帧可选 `tokens` 字段 →
+      标题下方常驻 `ctx 45.1k / tot 1.2M` 小字（焦点会话口径，daemon 增量解析
       transcript usage；帧未带/非法则隐藏——旧 daemon 行为不变）

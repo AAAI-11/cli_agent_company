@@ -182,13 +182,14 @@ function draw(t) {
     }
   }
 
-  // F15 token 底行：底部居中常驻小字（与固件同款缩写：45123→45.1k，1234567→1.2M）
+  // F15 token 行：标题下方常驻小字（与固件同款缩写 45123→45.1k；位置同固件：
+  // 顶栏标题下方、与气泡行同高——底部留给状态胶囊/text，别叠）
   if (ui.tokens) {
     const fmt = (v) => (v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}k` : String(v));
     ctx.font = '10px ui-monospace, monospace';
     ctx.fillStyle = '#565f89';
-    ctx.textAlign = 'center';
-    ctx.fillText(`ctx ${fmt(ui.tokens.ctx)} / tot ${fmt(ui.tokens.tot)}`, W / 2, H - 8);
+    ctx.textAlign = 'left';
+    ctx.fillText(`ctx ${fmt(ui.tokens.ctx)} / tot ${fmt(ui.tokens.tot)}`, 10, 42);
   }
 
   // 宠物（按状态附加动效）
