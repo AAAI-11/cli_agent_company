@@ -71,7 +71,7 @@ git status
 
 # ⑤ 提交（把改动记录到本地）
 git add .
-git commit -m "feat: 完成了 MQTT 通信"   # 引号里写清楚你做了什么
+git commit -m "feat: ES8311 录音链路打通"   # 引号里写清楚你做了什么
 
 # ⑥ 推送到 GitHub（首次加 -u，之后直接 git push 即可）
 git push -u origin feature/firmware
