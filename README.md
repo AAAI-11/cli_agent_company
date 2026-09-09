@@ -9,8 +9,9 @@ PC 侧一个 Node daemon 归一化 Claude Code hooks 事件，经自研 PetLink 
 
 **口径**：宪法文档为 [`01_需求与方案/需求说明文档.md`](01_需求与方案/需求说明文档.md)（v3.1）。
 范围冻结于 F01 状态可视化 / F03 实体键授权仲裁 / F05 自研 NDJSON 协议 / F06 Node daemon；
-语音输入 / 语音输出 / 会话统计经 grill 流程补入宪法 v3.1 并已全部落地，组件化 GUI、MQTT、
-自绘 PCB 等开题阶段设想仍裁剪（当时的技术路线残留在根目录旧开题报告中，仅作存档）。
+语音输入 / 语音输出 / 会话统计经 grill 流程补入宪法 v3.1，§4.2 Stretch 多会话气泡（F02R）
+亦已落地——宪法功能清单全部完成；组件化 GUI、MQTT、自绘 PCB 等开题阶段设想仍裁剪
+（当时的技术路线残留在根目录旧开题报告中，仅作存档）。
 
 ## 快速上手
 
@@ -28,9 +29,9 @@ cd daemon && npm install && npm start    # 起 daemon（macOS 需已装 Node 18+
 
 | 目录 | 内容 | 测试 |
 |---|---|---|
-| `daemon/` | Node daemon：hooks 归一化 + USB/WS/TCP 链路 + permission 仲裁 + tmux 注入 + whisper 语音输入 + say 语音播报 + 会话统计 | `npm run smoke` 22 项 |
-| `virtual_device/` | 浏览器虚拟设备（纯静态，与实体板同协议同状态机） | daemon smoke 内联覆盖 |
-| `04_firmware/esp32p4_firmware/` | ESP32-P4 固件（ESP-IDF v6.1 + LVGL）：PetLink 协议、六态 UI、PNG 素材槽、ES8311 录音 | `sh test/run.sh` 46 项宿主单测 |
+| `daemon/` | Node daemon：hooks 归一化 + USB/WS/TCP 链路 + permission 仲裁 + tmux 注入 + whisper 语音输入 + say 语音播报 + 会话统计 + 多会话焦点管理 | `npm run smoke` 26 项 |
+| `virtual_device/` | 浏览器虚拟设备（纯静态，与实体板同协议同状态机、同款会话气泡） | daemon smoke 内联覆盖 |
+| `04_firmware/esp32p4_firmware/` | ESP32-P4 固件（ESP-IDF v6.1 + LVGL）：PetLink 协议、六态 UI、PNG 素材槽、ES8311 录音、多会话气泡 | `sh test/run.sh` 52 项宿主单测 |
 | `docs/protocol.md` | PetLink v1 协议规范（帧格式/握手/心跳/判活/防乒乓） | 与固件单测同源 |
 | `04_firmware/oled_board_test/` | 早期 OLED 板验证程序（历史存档） | — |
 
@@ -65,6 +66,9 @@ cd daemon && npm install && npm start    # 起 daemon（macOS 需已装 Node 18+
       实体键仲裁矩阵四格全验：YES 短按 allow / NO deny / YES 长按 deny / 超时回落弹窗）
 - [x] v0.4 语音输入 + 语音输出 + 会话统计（2026-09-08 真机闭环：长按 YES → ES8311 录音 6s →
       whisper 本地转写 → tmux 注入逐字命中；daemon `say` 播报状态；`GET /stats` 会话画像）
+- [x] v0.5 多会话气泡（2026-09-09，F02R）：daemon 焦点管理（waiting_confirm 抢占、
+      NO 键空闲切换）+ state 帧可选 `bubbles` 字段 + 实体板/虚拟设备同款气泡行——
+      前向兼容，旧设备忽略新字段
 - [ ] 冲刺：演示材料、答辩准备、**提交前仓库公开**（创新叙事 = 真开源补完）
 
 ## 协作与工具

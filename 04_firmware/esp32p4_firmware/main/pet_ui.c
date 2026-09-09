@@ -219,6 +219,7 @@ static lv_obj_t *deco_arc(lv_obj_t *parent, int32_t w, int32_t x, int32_t y,
 static lv_obj_t *s_topbar;      /* 4px 状态条（pet.js fillRect(0,0,W,4)） */
 static lv_obj_t *s_lbl_title;
 static lv_obj_t *s_lbl_session;
+static lv_obj_t *s_bubble[PL_MAX_BUBBLES]; /* F02R 会话气泡行（顶栏右侧下方） */
 static lv_obj_t *s_halo;        /* 状态色光晕（径向渐变的实心近似） */
 static lv_obj_t *s_dog;         /* 宠物容器：原点=中心，子件用相对负坐标 */
 static lv_obj_t *s_lbl_state;   /* 底部状态胶囊 */
@@ -260,6 +261,12 @@ static void build_page(lv_display_t *disp)
   lv_obj_set_style_text_color(s_lbl_session, lv_color_hex(COL_TOPTEXT), 0);
   lv_obj_set_style_text_font(s_lbl_session, &lv_font_montserrat_16, 0);
   lv_obj_align(s_lbl_session, LV_ALIGN_TOP_RIGHT, -12, 14);
+
+  /* F02R 多会话气泡：预建隐藏，state 帧带 bubbles 才现身（apply_bubbles 重排） */
+  for (int i = 0; i < PL_MAX_BUBBLES; i++) {
+    s_bubble[i] = blob(scr, 0xffffff, 20, 20, -40, -40);
+    lv_obj_add_flag(s_bubble[i], LV_OBJ_FLAG_HIDDEN);
+  }
 
   /* 光晕：状态色低不透明度大圆（pet.js 径向渐变的实心近似） */
   s_halo = blob(scr, 0xffffff, X2(130) * 2, X2(130) * 2,
@@ -459,6 +466,51 @@ static void apply_state(pl_status_t st, const pet_ui_snap_t *snap)
 #endif
 }
 
+/* F02R 多会话气泡行：session 标签正下方右对齐，状态色圆点、焦点加大加白环。
+ * 签名（数量+每项 状态/焦点）不变则零开销跳过——33ms 每拍调用也无所谓 */
+static void apply_bubbles(const pet_ui_snap_t *snap)
+{
+  uint8_t sig[PL_MAX_BUBBLES + 1];
+  sig[0] = snap->bubble_n;
+  for (int i = 0; i < PL_MAX_BUBBLES; i++) {
+    sig[i + 1] = (i < snap->bubble_n)
+        ? (uint8_t)(snap->bubbles[i].st * 2 + (snap->bubbles[i].focus ? 1 : 0))
+        : 0xFF;
+  }
+  static uint8_t last_sig[PL_MAX_BUBBLES + 1]; /* 零初值 ≠ 任何合法签名 */
+  if (memcmp(sig, last_sig, sizeof(sig)) == 0) return;
+  memcpy(last_sig, sig, sizeof(sig));
+
+  const int n = snap->bubble_n;
+  for (int i = 0; i < PL_MAX_BUBBLES; i++) {
+    lv_obj_t *o = s_bubble[i];
+    if (i >= n) {
+      lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+      continue;
+    }
+    lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
+    const bool foc = snap->bubbles[i].focus;
+    const int32_t size = foc ? 28 : 20;
+    /* 槽位中心：行右对齐（右边距 12），pitch 36 容得下焦点加大 */
+    const int32_t cx = DISP_W - 12 - 17 - (n - 1 - i) * 36;
+    const int32_t cy = 52;
+    lv_obj_set_size(o, size, size);
+    lv_obj_set_pos(o, cx - size / 2, cy - size / 2);
+    lv_obj_set_style_bg_color(o, lv_color_hex(ui_style_for(snap->bubbles[i].st)->fg), 0);
+    if (foc) {
+      lv_obj_set_style_border_width(o, 2, 0);
+      lv_obj_set_style_border_color(o, lv_color_hex(0xffffff), 0);
+      lv_obj_set_style_border_opa(o, LV_OPA_COVER, 0);
+    } else {
+      lv_obj_set_style_border_width(o, 0, 0);
+    }
+  }
+  int fi = -1;
+  for (int i = 0; i < n; i++) if (snap->bubbles[i].focus) { fi = i; break; }
+  ESP_LOGI(TAG, "pet_ui: bubbles=%d focus@%d(%s)", n, fi,
+           fi >= 0 ? pl_status_name(snap->bubbles[fi].st) : "-");
+}
+
 /* ---------------- 每拍动画（相位公式与 pet.js 逐字对齐） ---------------- */
 
 static void anim_step(pl_status_t st, uint32_t t)
@@ -567,6 +619,8 @@ static void ui_tick(lv_timer_t *tmr)
     snprintf(last_text, sizeof(last_text), "%s", snap.text);
     last_text_st = snap.state;
   }
+
+  apply_bubbles(&snap); /* 签名 diff 内部跳过，每拍调用的开销可忽略 */
 }
 
 /* ---------------- LVGL 任务 ---------------- */

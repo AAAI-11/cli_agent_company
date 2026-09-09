@@ -77,12 +77,22 @@ curl -sX POST localhost:7331/permission -H 'Content-Type: application/json' \
 # → curl 返回 {"decision":"allow",...,"by":"device:virtual-1"}
 ```
 
-长按 YES = 拒绝；不按键 = 超时 deny。
+长按 YES = 拒绝；NO 键按下即拒；不按键 = 超时 deny。
+
+## 多会话焦点（F02R，v0.5）
+
+多个 Claude Code 会话同时挂到同一台 daemon 时，屏幕（state 帧）永远演**焦点会话**，
+其余会话以 `bubbles` 数组附在帧里（协议 §3.4，旧设备忽略即退化为单会话）：
+
+- **waiting_confirm 无条件抢占焦点**——不错过任何一个会话的授权请求
+- 焦点会话超时淘汰后回落到最新活跃会话
+- **空闲态按 NO 键循环切换焦点**（有授权挂起时 NO 仍是按下即拒，语义不被偷走）
+- 语音播报跟屏走：设备演的是谁，就念谁的状态
 
 ## 冒烟测试
 
 ```bash
-npm run smoke    # Node WS 客户端扮演设备，全链路断言（22 项：含统计/语音/audio 重组）
+npm run smoke    # Node WS 客户端扮演设备，全链路断言（26 项：含统计/语音/audio 重组/多会话焦点）
 ```
 
 ## 路线（W1）

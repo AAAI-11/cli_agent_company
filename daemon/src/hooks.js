@@ -93,7 +93,7 @@ function readBody(req) {
   });
 }
 
-function createHttpServer({ registry, links, perms, inject, stats, voice, log, startedAt }) {
+function createHttpServer({ registry, links, perms, inject, stats, voice, focus, log, startedAt }) {
   const srv = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(obj)); };
@@ -105,6 +105,7 @@ function createHttpServer({ registry, links, perms, inject, stats, voice, log, s
         proto: `petlink/${proto.VER}`,
         uptime_s: ((Date.now() - startedAt) / 1000) | 0,
         devices: [...links.devices.entries()].map(([id, c]) => ({ id, label: c.label, ...c.meta })),
+        focus: focus ? focus.focus : null,
         sessions: registry.snapshot(),
       });
     }
@@ -136,9 +137,15 @@ function createHttpServer({ registry, links, perms, inject, stats, voice, log, s
       const agent = String(body.agent || 'claude-code');
       registry.update(session, agent, norm.status, norm.text);
       stats.status(session, norm.status);
-      voice.announceStatus(norm.status, norm.text);
-      const n = links.broadcast({ type: 'state', session, agent, status: norm.status, text: norm.text });
-      return json(202, { ok: true, broadcast: n, session, status: norm.status });
+      // F02R：组装帧永远以焦点会话为主体（后台会话只刷新 bubbles 不抢屏）；
+      // 播报跟屏走——设备演的是谁，就念谁的状态
+      const frame = focus.frame(session, agent, norm.status, norm.text);
+      if (frame) {
+        voice.announceStatus(frame.status, frame.text);
+        const n = links.broadcast(frame);
+        return json(202, { ok: true, broadcast: n, session, status: norm.status, focus: frame.session });
+      }
+      return json(202, { ok: true, broadcast: 0, session, status: norm.status });
     }
 
     if (req.method === 'POST' && url.pathname === '/permission') {
@@ -162,7 +169,10 @@ function createHttpServer({ registry, links, perms, inject, stats, voice, log, s
         const agent = String(body.agent || 'claude-code');
         registry.update(sess, agent, 'thinking', '');
         stats.status(sess, 'thinking');
-        links.broadcast({ type: 'state', session: sess, agent, status: 'thinking', text: '' });
+        // 经焦点组装：该会话等待授权时本就是焦点，正常播回 thinking；
+        // 若期间焦点已被切走，则屏上保持新焦点会话（语义不串台）
+        const frame = focus.frame(sess, agent, 'thinking', '');
+        if (frame) links.broadcast(frame);
         res.writeHead(200);
         return res.end();
       }

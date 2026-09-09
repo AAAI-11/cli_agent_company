@@ -73,7 +73,8 @@ daemon（桌面，常驻）                     device（实体固件 / 虚拟�
 ### 3.4 state（daemon → device，广播）
 
 ```json
-{"ver":1,"type":"state","session":"a1b2","agent":"claude-code","status":"thinking","text":"梳理需求"}
+{"ver":1,"type":"state","session":"a1b2","agent":"claude-code","status":"thinking","text":"梳理需求",
+ "bubbles":[{"s":"a1b2","st":"thinking","f":1},{"s":"c3d4","st":"working","f":0}]}
 ```
 
 | 字段 | 必填 | 说明 |
@@ -82,6 +83,9 @@ daemon（桌面，常驻）                     device（实体固件 / 虚拟�
 | `agent` | ✓ | `claude-code`（v1 唯一；为多 Agent 预留） |
 | `status` | ✓ | 五态之一，见下表 |
 | `text` | ✗ | ≤32 字符短标签，设备可截断显示 |
+| `bubbles` | ✗ | 多会话快照（F02R）：存活会话按最新到最旧排序，最多 6 项；`s`=会话标识前 8 字符（仅显示用）、`st`=五态、`f`=1 表示**焦点会话**。帧头的 `session`/`status`/`text` 永远是焦点会话——旧设备忽略 `bubbles` 即天然只演焦点，行为不变 |
+
+**焦点规则**（daemon 侧 focus.js）：`waiting_confirm` 无条件抢占焦点（不错过任何会话的授权）；焦点会话超时淘汰后回落最新活跃；空闲态 `no` 键循环切换（见 §3.5）。
 
 **状态语义（项目核心词汇，三方统一）**
 
@@ -101,10 +105,11 @@ daemon（桌面，常驻）                     device（实体固件 / 虚拟�
 
 | 字段 | 说明 |
 |---|---|
-| `key` | v1：`yes` / `btn2` / `btn3`（自定义键）；实体按键映射在固件 pinmap 定义 |
+| `key` | v1：`yes` / `no` / `btn3`（自定义键）；实体按键映射在固件 pinmap 定义 |
 | `event` | `short` / `long` |
 
 **语义**：`yes` + `short` = 授权当前 `waiting_confirm` 的 permission 请求（创新点 F03 的回注通道）。
+`no`：有 permission 挂起 = 按下即拒；空闲（无挂起）= 循环切换多会话焦点（F02R）。
 
 ### 3.6 error（双向，可选）
 

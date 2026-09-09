@@ -199,12 +199,34 @@ static void pl_handle_line(pl_t *pl, const char *line, uint32_t now_ms)
     const cJSON *st = cJSON_GetObjectItem(root, "status");
     const char *s = cJSON_GetStringValue((cJSON *)st);
     pl_status_t mapped = status_from(s);
+
+    /* F02R 多会话气泡（协议 §3.4 可选字段）：每帧整体覆盖；未携带则清空。
+     * 未知 st 的项跳过（前向兼容），超上限截断 */
+    pl->bubble_n = 0;
+    if (mapped != PL_ST_CONNECTING) {
+      const cJSON *bub = cJSON_GetObjectItem(root, "bubbles");
+      const cJSON *e = NULL;
+      cJSON_ArrayForEach(e, bub) {
+        if (pl->bubble_n >= PL_MAX_BUBBLES) break;
+        if (!cJSON_IsObject(e)) continue; /* 非对象项：跳过，不拖垮后面的项 */
+        const cJSON *bst = cJSON_GetObjectItem(e, "st");
+        pl_status_t bm = status_from(cJSON_GetStringValue((cJSON *)bst));
+        if (bm == PL_ST_CONNECTING) continue; /* 缺 st/未知状态：跳过该项 */
+        const cJSON *bf = cJSON_GetObjectItem(e, "f");
+        pl->bubbles[pl->bubble_n].st = bm;
+        pl->bubbles[pl->bubble_n].focus = cJSON_IsTrue(bf) ||
+            (cJSON_IsNumber(bf) && bf->valuedouble != 0); /* daemon 发数字 0/1 */
+        pl->bubble_n++;
+      }
+    }
+
     if (mapped != PL_ST_CONNECTING && pl->cbs.on_state) {
       const cJSON *sess = cJSON_GetObjectItem(root, "session");
       const cJSON *text = cJSON_GetObjectItem(root, "text");
       pl->cbs.on_state(mapped,
                        cJSON_GetStringValue((cJSON *)sess),
                        cJSON_GetStringValue((cJSON *)text),
+                       pl->bubbles, pl->bubble_n,
                        pl->ctx);
     }
   }

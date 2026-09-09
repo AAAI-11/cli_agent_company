@@ -18,6 +18,7 @@ const ui = {
   status: 'thinking',
   text: '正在连接 daemon…',
   session: '',
+  bubbles: [], // F02R 多会话气泡：[{s,st,f}]，未知状态过滤、最多 6 个
   connected: false,
 };
 
@@ -66,6 +67,9 @@ function connect() {
         ui.status = STATE_STYLE[m.status] ? m.status : 'thinking';
         ui.text = m.text || STATE_STYLE[ui.status].zh;
         ui.session = m.session || '';
+        ui.bubbles = Array.isArray(m.bubbles)
+          ? m.bubbles.filter((b) => b && STATE_STYLE[b.st]).slice(0, 6)
+          : [];
         break;
       case 'heartbeat':
         if (!m.reply) { // 防乒乓：应答带 reply:true，收到应答不再回（协议 §3.3）
@@ -114,6 +118,16 @@ setInterval(() => send({ ver: 1, type: 'heartbeat', uptime_ms: performance.now()
   window.__yesFlash = () => ({ flashT, flashKind });
 })();
 
+/* ---------- NO 键：按下即发（有授权挂起=拒，空闲=切换焦点会话） ---------- */
+
+(() => {
+  const btn = document.getElementById('no');
+  btn.addEventListener('pointerdown', () => {
+    send({ ver: 1, type: 'button', key: 'no', event: 'short' });
+    window.__noFlash = performance.now();
+  });
+})();
+
 /* ---------- 渲染 ---------- */
 
 const cvs = document.getElementById('screen');
@@ -143,6 +157,25 @@ function draw(t) {
   ctx.fillText('PETLINK/1', 10, 22);
   ctx.textAlign = 'right';
   ctx.fillText(ui.session ? `# ${ui.session.slice(0, 10)}` : '# --', W - 10, 22);
+
+  // F02R 多会话气泡：session 标签下方右对齐一行，状态色圆点、焦点加大加白环
+  const n = ui.bubbles.length;
+  for (let i = 0; i < n; i++) {
+    const b = ui.bubbles[i];
+    const foc = !!b.f;
+    const r = foc ? 7 : 5;
+    const cx = W - 10 - 8 - (n - 1 - i) * 17;
+    const cy = 38;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = STATE_STYLE[b.st].color;
+    ctx.fill();
+    if (foc) {
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = '#ffffff';
+      ctx.stroke();
+    }
+  }
 
   // 宠物（按状态附加动效）
   const s = ui.status;
@@ -174,6 +207,15 @@ function draw(t) {
     ctx.font = '700 13px ui-monospace, monospace';
     ctx.fillStyle = f.flashKind === 'short' ? '#9ece6a' : '#f7768e';
     ctx.fillText(f.flashKind === 'short' ? 'YES → ALLOW' : 'YES(hold) → DENY', cx, H - 40);
+    ctx.globalAlpha = 1;
+  }
+  const ndt = window.__noFlash ? performance.now() - window.__noFlash : 1e9;
+  if (ndt < 500) {
+    ctx.globalAlpha = 1 - ndt / 500;
+    ctx.textAlign = 'center';
+    ctx.font = '700 13px ui-monospace, monospace';
+    ctx.fillStyle = '#f7768e';
+    ctx.fillText('NO → DENY / 切换会话', cx, H - 40);
     ctx.globalAlpha = 1;
   }
 

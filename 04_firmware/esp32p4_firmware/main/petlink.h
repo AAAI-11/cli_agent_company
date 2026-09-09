@@ -24,6 +24,7 @@ extern "C" {
 #define PL_HEARTBEAT_MS   5000  /* 探测周期 */
 #define PL_DEAD_MS        90000 /* 判活窗口（协议 §3.3） */
 #define PL_AUDIO_CHUNK    1800  /* 语音帧单块 PCM 字节：b64 后 2400B，整帧 ~2.5KB < 4KB 上限 */
+#define PL_MAX_BUBBLES    6     /* 多会话气泡上限（daemon focus.js 同值，协议 §3.4） */
 
 /* 五态词汇 + 握手前初始态（协议 §3.4，与 daemon/虚拟设备三方统一） */
 typedef enum {
@@ -37,11 +38,19 @@ typedef enum {
 
 const char *pl_status_name(pl_status_t st);
 
+/* F02R 多会话气泡：state 帧可选 bubbles 数组的一项（daemon 侧 focus.js 组装，
+ * 焦点会话带 focus=true；数组按最新到最旧排序，最多 PL_MAX_BUBBLES 个） */
+typedef struct {
+  pl_status_t st;
+  bool focus;
+} pl_bubble_t;
+
 typedef struct {
   /** 核心产出一条待发送的 NDJSON 行（不含 \n），传输层负责写出 */
   void (*send_line)(const char *line, void *ctx);
-  /** daemon 状态广播（协议 §3.4）；text 可能为 NULL */
-  void (*on_state)(pl_status_t st, const char *session, const char *text, void *ctx);
+  /** daemon 状态广播（协议 §3.4）；text/bubbles 可能为 NULL/0（帧未携带） */
+  void (*on_state)(pl_status_t st, const char *session, const char *text,
+                   const pl_bubble_t *bubbles, uint8_t bubble_n, void *ctx);
   /** 握手完成；daemon_ver 为对端版本串 */
   void (*on_hello_ok)(const char *daemon_ver, void *ctx);
   /** 本机运行时长（uptime_ms 字段用） */
@@ -61,6 +70,9 @@ typedef struct {
 
   char buf[PL_MAX_LINE * 2]; /* NDJSON 分帧缓冲（与 daemon LineFramer 同策略） */
   size_t len;
+
+  pl_bubble_t bubbles[PL_MAX_BUBBLES]; /* 最近一帧 state 的多会话快照 */
+  uint8_t bubble_n;
 
   char out[256]; /* 组包复用缓冲（控制帧 <200B；协议任务专用） */
   char out_audio[PL_MAX_LINE]; /* 语音帧组包缓冲（mic 任务专用——两任务

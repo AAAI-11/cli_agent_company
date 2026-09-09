@@ -127,6 +127,35 @@ async function main() {
     }).then((r) => r.json());
     check('POST /state 归一化广播', r6.ok && r6.status === 'working', `broadcast=${r6.broadcast}`);
 
+    // 6b) F02R 多会话（宪法 §4.2 Stretch）：后台不抢屏 / bubbles 附带 /
+    //     waiting_confirm 抢占 / 空闲 NO 键循环切换。
+    //     注：--fake 的假状态流走旧直发路径（无 bubbles、不参与焦点），
+    //     因此带 bubbles 的帧均来自焦点组装，断言用 HTTP 响应的 focus 字段避开时序竞争
+    const post6b = (body) => fetch(`${HTTP}/state`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }).then((r) => r.json());
+    const rb1 = await post6b({ event: 'UserPromptSubmit', session_id: 'sess-b1', prompt: '会话一启动' });
+    const rb2 = await post6b({ event: 'PreToolUse', session_id: 'sess-b2', tool_name: 'Bash' });
+    // 焦点归属"首个到达的会话"（此处更早的超时测试已让 default 持屏）——
+    // 不变量是"后台不抢"：b1/b2 都不能把 focus 从持屏会话手里夺走
+    check('F02R 后台会话不抢焦点', rb1.ok && rb2.ok && typeof rb2.focus === 'string' && rb2.focus !== 'sess-b1' && rb2.focus !== 'sess-b2', `focus=${rb2.focus}`);
+    await sleep(300);
+    const bub = rx.filter((m) => m.type === 'state' && Array.isArray(m.bubbles)).at(-1);
+    check('F02R state 帧携带 bubbles（恰一个焦点标记）',
+      !!bub && bub.bubbles.filter((b) => b.f === 1).length === 1
+        && bub.bubbles.some((b) => b.s === 'sess-b1') && bub.bubbles.some((b) => b.s === 'sess-b2'),
+      JSON.stringify(bub?.bubbles));
+    const rb3 = await post6b({ event: 'Notification', session_id: 'sess-b2', message: 'Claude needs your permission' });
+    check('F02R waiting_confirm 抢占焦点', rb3.ok && rb3.focus === 'sess-b2', `focus=${rb3.focus}`);
+    // 空闲态 NO 键：此刻无 permission 挂起（前面都已决出），按键落到焦点循环
+    const rxBefore = rx.length;
+    ws.send(JSON.stringify({ ver: 1, type: 'button', key: 'no', event: 'short' }));
+    await sleep(400);
+    const cyc = rx.slice(rxBefore).find((m) => m.type === 'state' && Array.isArray(m.bubbles));
+    check('F02R 空闲 NO 键循环切换焦点', !!cyc && cyc.session !== 'sess-b2'
+      && cyc.bubbles.filter((b) => b.f === 1).length === 1, `session=${cyc?.session} bubbles=${JSON.stringify(cyc?.bubbles)}`);
+
+
     // 7) 状态页与虚拟设备静态页
     const st = await fetch(`${HTTP}/status`).then((r) => r.json());
     check('/status 设备在册', (st.devices || []).some((d) => d.id === 'smoke-1'), JSON.stringify(st.devices));

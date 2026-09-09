@@ -24,6 +24,8 @@ typedef struct {
   char session[16]; /* 显示取前 10 字符（与虚拟设备 slice(0,10) 同口径） */
   char text[100];   /* state 帧短标签（daemon 截 32 cps，最坏 96 UTF-8 字节）；
                        空串=回退状态中文名（与 pet.js 同口径） */
+  pl_bubble_t bubbles[PL_MAX_BUBBLES]; /* F02R 多会话气泡（0 个=隐藏该行） */
+  uint8_t bubble_n;
   uint32_t arrived_ms; /* pet_ui_push 内盖戳（esp_timer ms），供 <500ms 度量 */
 } pet_ui_snap_t;
 

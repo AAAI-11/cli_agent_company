@@ -1,8 +1,9 @@
 # petlink-fw —— ESP32-P4 固件
 
-PetLink v1 设备端。**v0.4.2 语音输入版**：串口链路（**921600**）+ YES/NO 实体键 +
-MIPI-DSI 六态宠物 UI + 文本上屏 + 五态 PNG 素材槽 + **板载 ES8311 麦克风录音上行**
-（空闲态长按 YES → `audio` 分块帧 → daemon whisper 转写注入）。
+PetLink v1 设备端。**v0.5.0 多会话版**：串口链路（**921600**）+ YES/NO 实体键 +
+MIPI-DSI 六态宠物 UI + 文本上屏 + 五态 PNG 素材槽 + 板载 ES8311 麦克风录音上行 +
+**多会话气泡行**（state 帧可选 `bubbles` 字段：各会话状态色圆点、焦点加大加白环；
+空闲态 NO 键循环切换焦点——F02R，协议 §3.4）。
 v0.3 里程碑（2026-09-05 真机闭环）：状态切换→上屏实测首显 max 75ms / 缓存命中
 max 87ms，宪法预算 500ms。
 驱动基底 = 乐鑫官方示例 + espressif 组件（Apache-2.0，宪法 L109）；屏幕参数走卖家
@@ -25,13 +26,13 @@ esp32p4_firmware/
 │   ├── mic.h/.c            # ES8311 codec 录音任务：esp_codec_dev → PSRAM 缓冲 → audio 帧上行（v0.4）
 │   ├── main.c              # IDF 接线：UART0 收发（TX 互斥锁）+ 按键 + 语音触发 + STAGE 分派
 │   ├── disp_dsi.h/.c       # MIPI-DSI 点屏：WLK2802MIPI-15P 卖家参数（见文件头注释）
-│   ├── pet_ui.h/.c         # LVGL 六态宠物：矢量小狗 + 动画（与 pet.js 同源）
+│   ├── pet_ui.h/.c         # LVGL 六态宠物：矢量小狗 + 动画 + 多会话气泡行（与 pet.js 同源）
 │   ├── pet_assets.h/.c     # 五态 PNG 素材槽：FAT 挂载 + 预解码 + 矢量兜底（v0.3）
 │   ├── ui_map.h/.c         # 状态→样式映射：纯 C 查表（宿主可测，颜色与 pet.js 同源）
 │   ├── font_pet_32.c       # 中文字体子集（~500 字，重生成命令见文件头注释）
 │   └── Kconfig.projbuild   # YES/NO GPIO、STAGE 旋钮、LDO/RST、麦引脚/录音时长可配
 ├── tools/                  # 素材工具：gen_test_pngs.py（纯 stdlib 造五态图）+ mkassets.sh（打包烧录）
-└── test/                   # 宿主机单元测试 46 项（不装 ESP-IDF 也能跑）
+└── test/                   # 宿主机单元测试 52 项（不装 ESP-IDF 也能跑）
 ```
 
 ## 一次性环境安装（macOS）
@@ -185,7 +186,7 @@ sh tools/mkassets.sh
 2. 插板子、烧录——daemon 日志应出现：
    ```
    UsbCdcLink 连接 /dev/cu.usbmodemXXX（Espressif）@921600
-   [cdc#N] 握手完成 → p4-xxxxxx (fw=0.4.2 hw=p4-board caps=button,mic)
+   [cdc#N] 握手完成 → p4-xxxxxx (fw=0.5.0 hw=p4-board caps=button,mic)
    ```
 3. 浏览器开 http://localhost:7331/device —— 虚拟设备与实体板**同步**显示同一状态
    （daemon 向所有已握手设备广播，一实一虚同源）
@@ -195,7 +196,7 @@ sh tools/mkassets.sh
 ## 宿主机单元测试（不需要 ESP-IDF）
 
 ```bash
-sh test/run.sh    # 46 项：编码/分帧/握手/防乒乓/五态/容错/判活/文本截断/audio 帧 b64 与分块 + ui_map 六态映射
+sh test/run.sh    # 52 项：编码/分帧/握手/防乒乓/五态/容错/判活/文本截断/audio 帧 b64 与分块/bubbles 解析 + ui_map 六态映射
 ```
 
 ## 已知事项
@@ -221,3 +222,6 @@ sh test/run.sh    # 46 项：编码/分帧/握手/防乒乓/五态/容错/判活
 - [x] v0.4.2 麦克风正路：v0.4.0/0.4.1 误信网上资料走 PDM @ GPIO23/24（两槽皆
       精确零——那两脚上没有麦），据微雪 wiki 改走 **ES8311 codec + I2S STD +
       esp_codec_dev**（2026-09-08 真机转写逐字命中；细节见 DEBUG.md）
+- [x] v0.5.0 多会话气泡（F02R，2026-09-09）：state 帧可选 `bubbles` 数组 →
+      顶栏气泡行；daemon 焦点管理（waiting_confirm 抢占 / NO 键空闲切换），
+      虚拟设备同款渲染——一实一虚同源

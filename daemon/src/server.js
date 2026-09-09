@@ -10,6 +10,7 @@
 const { LinkManager } = require('./links');
 const { createHttpServer, PermissionManager } = require('./hooks');
 const { SessionRegistry } = require('./state');
+const { FocusManager } = require('./focus');
 const { Stats } = require('./stats');
 const { Voice } = require('./voice');
 const { transcribe } = require('./whisper');
@@ -32,6 +33,7 @@ const registry = new SessionRegistry();
 const perms = new PermissionManager(log);
 const stats = new Stats();
 const voice = new Voice(log);
+const focus = new FocusManager(registry, log);
 
 /** 语音输入 → tmux 注入目标：PETLINK_INJECT_PANE 指定；未指定且唯一 pane 时选它；否则放弃 */
 async function pickPane(logfn) {
@@ -69,12 +71,26 @@ const links = new LinkManager({
   onButton: (key, event, dev) => {
     stats.button(key, event);
     const consumed = perms.resolveButton(key, event, dev);
-    log(`[button] key=${key} event=${event} dev=${dev} → ${consumed ? '已消费（permission 仲裁）' : '无消费者（预留自定义动作）'}`);
+    if (consumed) {
+      log(`[button] key=${key} event=${event} dev=${dev} → 已消费（permission 仲裁）`);
+      return;
+    }
+    // F02R：空闲态 NO 键 = 循环切换焦点会话（有授权挂起时按键已被上面消费，
+    // 走不到这里——"按下即拒"语义不被切换偷走）
+    if (key === 'no') {
+      const frame = focus.cycle();
+      if (frame) {
+        links.broadcast(frame);
+        log(`[button] key=${key} event=${event} dev=${dev} → 切换焦点会话`);
+        return;
+      }
+    }
+    log(`[button] key=${key} event=${event} dev=${dev} → 无消费者（预留自定义动作）`);
   },
   onAudio: (dev, a) => { handleAudio(dev, a); },
 });
 
-const httpSrv = createHttpServer({ registry, links, perms, inject, stats, voice, log, startedAt });
+const httpSrv = createHttpServer({ registry, links, perms, inject, stats, voice, focus, log, startedAt });
 httpSrv.on('error', (e) => {
   if (e.code === 'EADDRINUSE') {
     log(`✗ 端口 ${OPTS.http} 已被占用——多半是已有一个 daemon 在跑。先停旧的再起：`);

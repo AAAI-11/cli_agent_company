@@ -40,15 +40,20 @@ static void feed(pl_t *pl, const char *line_no_nl, uint32_t now) {
 
 static pl_status_t last_st = PL_ST_CONNECTING;
 static char last_sess[32] = "", last_text[64] = "";
+static pl_bubble_t last_bubbles[PL_MAX_BUBBLES];
+static uint8_t last_bubble_n;
 static int st_n;
 static char hello_ok_ver[32] = "";
 static int hello_ok_n;
 
-static void on_state(pl_status_t st, const char *session, const char *text, void *ctx) {
+static void on_state(pl_status_t st, const char *session, const char *text,
+                     const pl_bubble_t *bubbles, uint8_t bubble_n, void *ctx) {
   (void)ctx;
   last_st = st;
   snprintf(last_sess, sizeof(last_sess), "%s", session ? session : "(null)");
   snprintf(last_text, sizeof(last_text), "%s", text ? text : "(null)");
+  last_bubble_n = bubble_n;
+  memcpy(last_bubbles, bubbles, bubble_n * sizeof(pl_bubble_t));
   st_n++;
 }
 static void on_hello_ok(const char *ver, void *ctx) {
@@ -62,6 +67,7 @@ static void pl_setup(pl_t *pl, const char *id) {
   pl_init(pl, &cbs, NULL, id, "0.1.0");
   reset_tx(); st_n = 0; hello_ok_n = 0; fake_uptime_val = 4242;
   last_st = PL_ST_CONNECTING; last_sess[0] = last_text[0] = '\0';
+  last_bubble_n = 0;
 }
 
 /** 已握手的会话：pl_start + 喂 hello_ok，返回后设备处于握手完成态 */
@@ -234,6 +240,41 @@ int main(void) {
     reset_tx();
     pl_audio(&pl, "a3", 0, false, 16000, NULL, 0);
     CHECK(tx_n == 0, "n=0 非 end 的非法调用静默忽略");
+  }
+
+  printf("== 10. F02R 多会话气泡（协议 §3.4 可选 bubbles） ==\n");
+  {
+    pl_setup(&pl, "p4-abc123");
+    handshake(&pl, 0);
+
+    /* 完整解析：三项，中间项是焦点 */
+    feed(&pl, "{\"ver\":1,\"type\":\"state\",\"session\":\"aaa\",\"status\":\"working\","
+              "\"bubbles\":[{\"s\":\"aaa\",\"st\":\"working\",\"f\":1},"
+              "{\"s\":\"bbb\",\"st\":\"waiting_confirm\",\"f\":0},"
+              "{\"s\":\"ccc\",\"st\":\"thinking\"}]}", 100);
+    CHECK(st_n == 1 && last_bubble_n == 3, "bubbles 三项全解析");
+    CHECK(last_bubbles[0].st == PL_ST_WORKING && last_bubbles[0].focus,
+          "焦点项 st/f 正确（缺省 f 视为 false）");
+    CHECK(last_bubbles[1].st == PL_ST_WAITING_CONFIRM && !last_bubbles[1].focus,
+          "非焦点项 st/f 正确");
+
+    /* 帧不携带 bubbles → 清空（旧 daemon / 回退路径） */
+    feed(&pl, "{\"ver\":1,\"type\":\"state\",\"session\":\"aaa\",\"status\":\"thinking\"}", 110);
+    CHECK(st_n == 2 && last_bubble_n == 0, "未携带 bubbles → bubble_n=0");
+
+    /* 坏项跳过不拖垮整帧：未知 st / 非对象项 */
+    feed(&pl, "{\"ver\":1,\"type\":\"state\",\"session\":\"aaa\",\"status\":\"done\","
+              "\"bubbles\":[{\"st\":\"hologram\"},7,{\"st\":\"error\",\"f\":1}]}", 120);
+    CHECK(st_n == 3 && last_bubble_n == 1 && last_bubbles[0].st == PL_ST_ERROR,
+          "未知 st/非对象项跳过，好项保留");
+
+    /* 超 6 项截断 */
+    char big[512];
+    snprintf(big, sizeof(big), "{\"ver\":1,\"type\":\"state\",\"session\":\"m\",\"status\":\"working\","
+             "\"bubbles\":[{\"st\":\"done\"},{\"st\":\"done\"},{\"st\":\"done\"},"
+             "{\"st\":\"done\"},{\"st\":\"done\"},{\"st\":\"done\"},{\"st\":\"error\"}]}");
+    feed(&pl, big, 130);
+    CHECK(st_n == 4 && last_bubble_n == PL_MAX_BUBBLES, "超上限截断到 6");
   }
 
   printf("\n结果：%d/%d 通过\n", passed, total);
