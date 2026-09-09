@@ -142,33 +142,66 @@ int main(void) {
     CHECK(strcmp(out, "Bash") == 0, "短 text 原样保留");
   }
 
-  /* 10) ui_text_line：超长截 16 码点且不劈 UTF-8 */
+  /* 10) ui_text_line：超长截 16 码点且不劈 UTF-8（混入缺字也不影响截断几何） */
   {
     char out[64];
-    /* 20 个汉字 → 截前 16 个（48 字节） */
-    ui_text_line("一二三四五六七八九十甲乙丙丁戊己庚辛壬癸子", PL_ST_DONE, out, sizeof(out));
+    /* 20 个在库汉字 → 截前 16 个（48 字节，原样） */
+    ui_text_line("梳理需求边界请求构建镜像模拟器宠矢素材资源形", PL_ST_DONE, out, sizeof(out));
     size_t n = strlen(out);
-    int ok = (n == 48) && (out[0] == (char)0xE4);
-    /* 尾字符必须完整：末字节是续字节、且再回溯 2 字节是 0xE4 前导 */
+    int ok = (n == 48) && (out[0] == (char)0xE6);
+    /* 尾字符必须完整：末字节是续字节、且再回溯 2 字节是 0xE6 前导 */
     ok = ok && (((unsigned char)out[n - 1] & 0xC0) == 0x80)
             && (((unsigned char)out[n - 3] & 0xF0) == 0xE0);
-    /* ASCII 40 字符 → 截 16 */
+    /* ASCII 40 字符 → 截 16（ASCII 无缺字概念） */
     char out2[64];
     ui_text_line("abcdefghijklmnopqrstuvwxyz0123456789abcd", PL_ST_DONE, out2, sizeof(out2));
     ok = ok && (strlen(out2) == 16);
-    CHECK(ok, "超长 text 截 16 码点（中 48B / ASCII 16B）且 UTF-8 完整");
+    /* 20 个全缺字 → 16 个 '?'（每码点 1 字节） */
+    char out3[64];
+    ui_text_line("㵘㵘㵘㵘㵘㵘㵘㵘㵘㵘㵘㵘㵘㵘㵘㵘㵘㵘㵘㵘", PL_ST_DONE, out3, sizeof(out3));
+    ok = ok && (strlen(out3) == 16) && (out3[0] == '?') && (out3[15] == '?');
+    CHECK(ok, "超长 text 截 16 码点（在库 48B / ASCII 16B / 缺字 16 个?）");
   }
 
   /* 11) ui_text_line：cap 极小时安全（不越界，NUL 终结） */
   {
     char out[4];
-    ui_text_line("一二三四五", PL_ST_DONE, out, sizeof(out));
+    ui_text_line("梳理需求边界", PL_ST_DONE, out, sizeof(out));
     int ok = (out[3] == '\0') && strlen(out) <= 3;
     /* 容量 3 放不下 3 字节汉字（需 3B + NUL=4）→ 应得空串或已完整字符 */
     ok = ok && (strlen(out) == 0 || strlen(out) == 3);
     ui_text_line("ab", PL_ST_DONE, out, sizeof(out));
     ok = ok && strcmp(out, "ab") == 0;
     CHECK(ok, "小容量下安全截断（含 NUL）");
+  }
+
+  /* 12) ui_text_line：缺字回退 '?'（2026-09-09 真机豆腐块事故——prompt 原文
+   *     不受字表控制，缺字必须显 ? 而不是画不出来的方块） */
+  {
+    char out[64];
+    /* 㵘(U+3D58, 基本区外) 字库必无 → ?；ASCII 不受影响 */
+    ui_text_line("a㵘b", PL_ST_DONE, out, sizeof(out));
+    int ok = strcmp(out, "a?b") == 0;
+    /* 混排：在库字原样、缺字替换，不拖垮整串 */
+    ui_text_line("测试㵘完成", PL_ST_DONE, out, sizeof(out));
+    ok = ok && strcmp(out, "测试?完成") == 0;
+    /* 全 ASCII 完全不动 */
+    ui_text_line("rm -rf /tmp", PL_ST_DONE, out, sizeof(out));
+    ok = ok && strcmp(out, "rm -rf /tmp") == 0;
+    CHECK(ok, "缺字回退 '?'（不画豆腐块）");
+  }
+
+  /* 13) 字表新增字已同步：'验''检' 必须在 PET_FONT_TEXT_SYMBOLS 里
+   *     （gen_font_text.py 补词后忘跑 --header 会在这里炸出来） */
+  {
+    size_t j = 0;
+    int yan = 0, jian = 0;
+    while (PET_FONT_TEXT_SYMBOLS[j]) {
+      const uint32_t cp = next_cp(PET_FONT_TEXT_SYMBOLS, &j);
+      if (cp == 0x9A8C) yan = 1; /* 验 */
+      if (cp == 0x68C0) jian = 1; /* 检 */
+    }
+    CHECK(yan && jian, "字表含 验/检（与 gen_font_text.py 同步）");
   }
 
   printf("\n结果：%d/%d 通过\n", passed, total);
