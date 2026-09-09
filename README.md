@@ -44,7 +44,7 @@ cd daemon && npm install && npm start    # 起 daemon（macOS 需已装 Node 18+
 | `02_系统设计/` | 架构补充文档（主干已在宪法与 `docs/protocol.md`） |
 | `03_硬件设计/` | 数据手册、选型记录（现用微雪成品板，无自绘 PCB） |
 | `06_结构设计/` | 外壳 3D 模型（后期） |
-| `07_测试验证/` | 硬件/固件/整机测试记录（日常排障见固件 `DEBUG.md`） |
+| `07_测试验证/` | 硬件/固件/整机测试记录（日常排障见根目录《功能与排障手册.md》） |
 | `08_生产与交付/` | 烧录装配指南、演示与答辩材料 |
 
 开题阶段多服务架构的空壳 `05_PC端服务/` 已删除，现由单体 `daemon/` 取代。
@@ -75,3 +75,4 @@ cd daemon && npm install && npm start    # 起 daemon（macOS 需已装 Node 18+
 
 - 分支模型与提交规范：[CONTRIBUTING.md](CONTRIBUTING.md)
 - Git/GitHub 入门（写给队友）：[GitHub使用手册.md](GitHub使用手册.md)
+- [功能与排障手册.md](功能与排障手册.md)：已实现功能清单（含验证状态）+ 真机排障步骤（原固件 DEBUG.md 并入）
