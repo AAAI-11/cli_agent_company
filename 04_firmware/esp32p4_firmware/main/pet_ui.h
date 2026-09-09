@@ -26,6 +26,8 @@ typedef struct {
                        空串=回退状态中文名（与 pet.js 同口径） */
   pl_bubble_t bubbles[PL_MAX_BUBBLES]; /* F02R 多会话气泡（0 个=隐藏该行） */
   uint8_t bubble_n;
+  pl_tokens_t tokens; /* F15 焦点会话 token 快照（tokens_valid=0 时隐藏底行） */
+  bool tokens_valid;
   uint32_t arrived_ms; /* pet_ui_push 内盖戳（esp_timer ms），供 <500ms 度量 */
 } pet_ui_snap_t;
 

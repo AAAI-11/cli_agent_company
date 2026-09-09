@@ -20,10 +20,12 @@ class FocusManager {
   /**
    * @param {import('./state').SessionRegistry} registry
    * @param {(m: string) => void} log
+   * @param {(frame: object) => object=} enrich 帧出口装饰（F15：给焦点会话的帧附 tokens）
    */
-  constructor(registry, log) {
+  constructor(registry, log, enrich) {
     this.registry = registry;
     this.log = log || (() => {});
+    this.enrich = enrich || ((f) => f);
     /** @type {string|null} */
     this.focus = null;
   }
@@ -51,11 +53,25 @@ class FocusManager {
     }
     this._ensureFocus(session);
     const f = this.focus && this._live().find((s) => s.session === this.focus);
-    if (!f) return null;
-    return {
+    return f ? this._out(f) : null;
+  }
+
+  /**
+   * 无新事件、按注册表现状重组焦点帧（F15 的 5s 轮询刷新路径：
+   * transcript 在长而 hook 事件未到，token 数也得动）。
+   */
+  reframe() {
+    this._ensureFocus(this.focus);
+    const f = this.focus && this._live().find((s) => s.session === this.focus);
+    return f ? this._out(f) : null;
+  }
+
+  /** 帧组装唯一出口：焦点会话 state + bubbles + enrich 装饰 */
+  _out(f) {
+    return this.enrich({
       type: 'state', session: f.session, agent: f.agent, status: f.status, text: f.text,
       bubbles: this.bubbles(),
-    };
+    });
   }
 
   /**
@@ -84,10 +100,7 @@ class FocusManager {
     const f = this._live().find((s) => s.session === this.focus);
     if (!f) return null;
     this.log(`[focus] NO 键切换焦点 → ${this.focus.slice(0, 8)}（${f.status}）`);
-    return {
-      type: 'state', session: f.session, agent: f.agent, status: f.status, text: f.text,
-      bubbles: this.bubbles(),
-    };
+    return this._out(f);
   }
 }
 

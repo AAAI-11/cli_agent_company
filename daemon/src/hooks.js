@@ -93,7 +93,7 @@ function readBody(req) {
   });
 }
 
-function createHttpServer({ registry, links, perms, inject, stats, voice, focus, log, startedAt }) {
+function createHttpServer({ registry, links, perms, inject, stats, voice, focus, tokens, log, startedAt }) {
   const srv = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(obj)); };
@@ -107,6 +107,7 @@ function createHttpServer({ registry, links, perms, inject, stats, voice, focus,
         devices: [...links.devices.entries()].map(([id, c]) => ({ id, label: c.label, ...c.meta })),
         focus: focus ? focus.focus : null,
         sessions: registry.snapshot(),
+        tokens: tokens.snapshotAll(),
       });
     }
 
@@ -135,6 +136,10 @@ function createHttpServer({ registry, links, perms, inject, stats, voice, focus,
       if (!norm) return json(422, { ok: false, err: 'unmapped_event', event: eventName || null });
       const session = String(body.session_id || body.session || 'default').slice(0, 64);
       const agent = String(body.agent || 'claude-code');
+      // F15：hook 载荷带 transcript_path 就增量解析 token（enrich 在帧出口统一附 tokens）
+      if (typeof body.transcript_path === 'string' && body.transcript_path) {
+        tokens.poll(session, body.transcript_path);
+      }
       registry.update(session, agent, norm.status, norm.text);
       stats.status(session, norm.status);
       // F02R：组装帧永远以焦点会话为主体（后台会话只刷新 bubbles 不抢屏）；

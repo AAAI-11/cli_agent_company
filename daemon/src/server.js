@@ -11,6 +11,7 @@ const { LinkManager } = require('./links');
 const { createHttpServer, PermissionManager } = require('./hooks');
 const { SessionRegistry } = require('./state');
 const { FocusManager } = require('./focus');
+const { TokenTracker } = require('./tokens');
 const { Stats } = require('./stats');
 const { Voice } = require('./voice');
 const { transcribe } = require('./whisper');
@@ -33,7 +34,13 @@ const registry = new SessionRegistry();
 const perms = new PermissionManager(log);
 const stats = new Stats();
 const voice = new Voice(log);
-const focus = new FocusManager(registry, log);
+const tokens = new TokenTracker(log);
+// F15：帧出口统一装饰——焦点会话的 state 帧附带其 token 快照（协议 §3.4 可选字段）
+const focus = new FocusManager(registry, log, (fr) => {
+  const t = tokens.get(fr.session);
+  if (t) fr.tokens = t;
+  return fr;
+});
 
 /** 语音输入 → tmux 注入目标：PETLINK_INJECT_PANE 指定；未指定且唯一 pane 时选它；否则放弃 */
 async function pickPane(logfn) {
@@ -90,7 +97,7 @@ const links = new LinkManager({
   onAudio: (dev, a) => { handleAudio(dev, a); },
 });
 
-const httpSrv = createHttpServer({ registry, links, perms, inject, stats, voice, focus, log, startedAt });
+const httpSrv = createHttpServer({ registry, links, perms, inject, stats, voice, focus, tokens, log, startedAt });
 httpSrv.on('error', (e) => {
   if (e.code === 'EADDRINUSE') {
     log(`✗ 端口 ${OPTS.http} 已被占用——多半是已有一个 daemon 在跑。先停旧的再起：`);
@@ -109,6 +116,19 @@ if (OPTS.fake) {
   startFake(registry, links, stats, voice, log);
   log('假状态流已启动（--fake）');
 }
+
+// F15：长时间回合里 transcript 一直长而 hook 事件未到——轮询焦点会话兜底刷新
+// （transcript_path 只在 hook 事件里出现，所以轮询复用 tracker 里存的路径）
+const TOKENS_POLL_MS = Number(process.env.PETLINK_TOKENS_POLL_MS) || 5000;
+setInterval(() => {
+  const s = focus.focus;
+  if (!s) return;
+  const before = tokens.get(s);
+  const after = tokens.poll(s);
+  if (!after || (before && before.ctx === after.ctx && before.tot === after.tot)) return;
+  const frame = focus.reframe();
+  if (frame) links.broadcast(frame);
+}, TOKENS_POLL_MS).unref();
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {

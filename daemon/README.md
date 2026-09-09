@@ -89,10 +89,20 @@ curl -sX POST localhost:7331/permission -H 'Content-Type: application/json' \
 - **空闲态按 NO 键循环切换焦点**（有授权挂起时 NO 仍是按下即拒，语义不被偷走）
 - 语音播报跟屏走：设备演的是谁，就念谁的状态
 
+## token 消耗统计（F15，v0.6）
+
+daemon 增量 tail 各会话的 transcript（hook 载荷自带 `transcript_path`），从 assistant
+消息的 usage 四项算两个口径，随焦点会话的 state 帧下发（`tokens` 字段，协议 §3.4）：
+
+- `ctx` = 最新一次 API 调用四项之和（此刻上下文占多大，compact 后自然回落）
+- `tot` = 历次累加（本会话共烧多少）
+- 长回合无 hook 事件时 5s 轮询焦点会话兜底刷新（`PETLINK_TOKENS_POLL_MS` 可调）
+- `curl -s localhost:7331/status` 的 `tokens` 字段可看所有会话的快照（调试用）
+
 ## 冒烟测试
 
 ```bash
-npm run smoke    # Node WS 客户端扮演设备，全链路断言（26 项：含统计/语音/audio 重组/多会话焦点）
+npm run smoke    # Node WS 客户端扮演设备，全链路断言（28 项：含统计/语音/audio 重组/多会话焦点/token）
 ```
 
 ## 路线（W1）

@@ -74,7 +74,8 @@ daemon（桌面，常驻）                     device（实体固件 / 虚拟�
 
 ```json
 {"ver":1,"type":"state","session":"a1b2","agent":"claude-code","status":"thinking","text":"梳理需求",
- "bubbles":[{"s":"a1b2","st":"thinking","f":1},{"s":"c3d4","st":"working","f":0}]}
+ "bubbles":[{"s":"a1b2","st":"thinking","f":1},{"s":"c3d4","st":"working","f":0}],
+ "tokens":{"ctx":45123,"tot":1234567}}
 ```
 
 | 字段 | 必填 | 说明 |
@@ -84,6 +85,7 @@ daemon（桌面，常驻）                     device（实体固件 / 虚拟�
 | `status` | ✓ | 五态之一，见下表 |
 | `text` | ✗ | ≤32 字符短标签，设备可截断显示 |
 | `bubbles` | ✗ | 多会话快照（F02R）：存活会话按最新到最旧排序，最多 6 项；`s`=会话标识前 8 字符（仅显示用）、`st`=五态、`f`=1 表示**焦点会话**。帧头的 `session`/`status`/`text` 永远是焦点会话——旧设备忽略 `bubbles` 即天然只演焦点，行为不变 |
+| `tokens` | ✗ | token 消耗（F15，焦点会话口径）：`ctx` = 当前上下文占用（最新一次 API 调用 usage 四项之和，compact 后自然回落）；`tot` = 本会话累计消耗（单调递增）。均为非负整数。缺省/非法时设备应维持上次值或隐藏显示 |
 
 **焦点规则**（daemon 侧 focus.js）：`waiting_confirm` 无条件抢占焦点（不错过任何会话的授权）；焦点会话超时淘汰后回落最新活跃；空闲态 `no` 键循环切换（见 §3.5）。
 

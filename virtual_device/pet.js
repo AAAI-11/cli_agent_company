@@ -19,6 +19,7 @@ const ui = {
   text: '正在连接 daemon…',
   session: '',
   bubbles: [], // F02R 多会话气泡：[{s,st,f}]，未知状态过滤、最多 6 个
+  tokens: null, // F15 焦点会话 token 快照 {ctx,tot}；null=隐藏底行
   connected: false,
 };
 
@@ -70,6 +71,10 @@ function connect() {
         ui.bubbles = Array.isArray(m.bubbles)
           ? m.bubbles.filter((b) => b && STATE_STYLE[b.st]).slice(0, 6)
           : [];
+        // F15：帧带合法 tokens 才显示（半截/非法一律 null=隐藏，与固件同口径）
+        const t = m.tokens;
+        ui.tokens = t && Number.isFinite(t.ctx) && Number.isFinite(t.tot)
+          && t.ctx >= 0 && t.tot >= 0 ? { ctx: t.ctx, tot: t.tot } : null;
         break;
       case 'heartbeat':
         if (!m.reply) { // 防乒乓：应答带 reply:true，收到应答不再回（协议 §3.3）
@@ -175,6 +180,15 @@ function draw(t) {
       ctx.strokeStyle = '#ffffff';
       ctx.stroke();
     }
+  }
+
+  // F15 token 底行：底部居中常驻小字（与固件同款缩写：45123→45.1k，1234567→1.2M）
+  if (ui.tokens) {
+    const fmt = (v) => (v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}k` : String(v));
+    ctx.font = '10px ui-monospace, monospace';
+    ctx.fillStyle = '#565f89';
+    ctx.textAlign = 'center';
+    ctx.fillText(`ctx ${fmt(ui.tokens.ctx)} / tot ${fmt(ui.tokens.tot)}`, W / 2, H - 8);
   }
 
   // 宠物（按状态附加动效）

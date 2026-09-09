@@ -29,7 +29,8 @@ async function main() {
            PETLINK_SERIAL_PATH: '/dev/nonexistent-petlink-test', // 测试 daemon 不碰真机串口（避免与生产 daemon 抢口）
            PETLINK_VOICE_DRY: '1',                 // 语音输出干跑：只记日志不真发声
            PETLINK_VOICE_GAP_MS: '1',               // 测试里三条播报间隔 <1s，默认 3s 冷却会吞掉
-           PETLINK_WHISPER_BIN: '/nonexistent-whisper-test' }, // 语音输入走"缺依赖"路径（不依赖本机装没装）
+           PETLINK_WHISPER_BIN: '/nonexistent-whisper-test', // 语音输入走"缺依赖"路径（不依赖本机装没装）
+           PETLINK_TOKENS_POLL_MS: '150' },            // F15 轮询缩短，等 500ms 即可验兜底刷新
   });
   const daemonLog = [];
   daemon.stdout.on('data', (d) => daemonLog.push(d.toString()));
@@ -154,6 +155,37 @@ async function main() {
     const cyc = rx.slice(rxBefore).find((m) => m.type === 'state' && Array.isArray(m.bubbles));
     check('F02R 空闲 NO 键循环切换焦点', !!cyc && cyc.session !== 'sess-b2'
       && cyc.bubbles.filter((b) => b.f === 1).length === 1, `session=${cyc?.session} bubbles=${JSON.stringify(cyc?.bubbles)}`);
+
+    // 6c) F15 token 消耗显示（宪法 §4.5）：transcript 增量解析 → 焦点帧附 tokens；
+    //     坏行/非 assistant 行忽略；无事件期的追加靠轮询兜底可见
+    const fsMod = require('fs');
+    const osMod = require('os');
+    const tdir = fsMod.mkdtempSync(path.join(osMod.tmpdir(), 'petlink-tokens-'));
+    const tfile = path.join(tdir, 'sess-t1.jsonl');
+    const usageLine = (i, o, cc, cr) => JSON.stringify({
+      type: 'assistant',
+      message: { usage: { input_tokens: i, output_tokens: o, cache_creation_input_tokens: cc, cache_read_input_tokens: cr } },
+    });
+    fsMod.writeFileSync(tfile, [
+      JSON.stringify({ type: 'user', message: 'hi' }), // 非 assistant：不计
+      usageLine(100, 20, 0, 400),                      // 行计 520
+      'not json at all',                               // 坏行：不计
+      usageLine(120, 30, 50, 500),                     // 行计 700
+    ].join('\n') + '\n');
+    // waiting_confirm 抢占焦点，token 才会随帧下发（口径 = 焦点会话）
+    const rb4 = await post6b({ event: 'Notification', session_id: 'sess-t1', message: 'Claude needs your permission', transcript_path: tfile });
+    await sleep(300);
+    const tk1 = rx.filter((m) => m.type === 'state' && m.tokens).at(-1);
+    check('F15 state 帧携带 tokens（ctx=最新条 700 / tot=累加 1220，坏行忽略）',
+      rb4.focus === 'sess-t1' && tk1 && tk1.session === 'sess-t1' && tk1.tokens.ctx === 700 && tk1.tokens.tot === 1220,
+      `focus=${rb4.focus} tokens=${JSON.stringify(tk1?.tokens)}`);
+    // 无事件期追加一行：等轮询（150ms）自发刷新帧，不 POST 任何东西
+    fsMod.appendFileSync(tfile, usageLine(10, 5, 0, 700) + '\n'); // 行计 715
+    await sleep(600);
+    const tk2 = rx.filter((m) => m.type === 'state' && m.tokens && m.session === 'sess-t1').at(-1);
+    check('F15 轮询兜底刷新（无事件期追加可见）',
+      !!tk2 && tk2.tokens.ctx === 715 && tk2.tokens.tot === 1935,
+      `tokens=${JSON.stringify(tk2?.tokens)}`);
 
 
     // 7) 状态页与虚拟设备静态页

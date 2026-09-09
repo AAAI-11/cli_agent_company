@@ -45,12 +45,21 @@ typedef struct {
   bool focus;
 } pl_bubble_t;
 
+/* F15 token 消耗（焦点会话口径，协议 §3.4 可选 tokens 字段）：
+ * ctx = 当前上下文占用（最新一次 API 调用 usage 四项之和），
+ * tot = 本会话累计消耗（单调递增） */
+typedef struct {
+  uint32_t ctx;
+  uint32_t tot;
+} pl_tokens_t;
+
 typedef struct {
   /** 核心产出一条待发送的 NDJSON 行（不含 \n），传输层负责写出 */
   void (*send_line)(const char *line, void *ctx);
-  /** daemon 状态广播（协议 §3.4）；text/bubbles 可能为 NULL/0（帧未携带） */
+  /** daemon 状态广播（协议 §3.4）；text/bubbles/tokens 可能为 NULL（帧未携带） */
   void (*on_state)(pl_status_t st, const char *session, const char *text,
-                   const pl_bubble_t *bubbles, uint8_t bubble_n, void *ctx);
+                   const pl_bubble_t *bubbles, uint8_t bubble_n,
+                   const pl_tokens_t *tokens, void *ctx);
   /** 握手完成；daemon_ver 为对端版本串 */
   void (*on_hello_ok)(const char *daemon_ver, void *ctx);
   /** 本机运行时长（uptime_ms 字段用） */
@@ -73,6 +82,9 @@ typedef struct {
 
   pl_bubble_t bubbles[PL_MAX_BUBBLES]; /* 最近一帧 state 的多会话快照 */
   uint8_t bubble_n;
+
+  pl_tokens_t tokens; /* 最近一帧 state 的焦点会话 token 快照 */
+  bool tokens_valid;  /* 帧未携带时维持 false，UI 隐藏显示 */
 
   char out[256]; /* 组包复用缓冲（控制帧 <200B；协议任务专用） */
   char out_audio[PL_MAX_LINE]; /* 语音帧组包缓冲（mic 任务专用——两任务

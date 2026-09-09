@@ -42,18 +42,23 @@ static pl_status_t last_st = PL_ST_CONNECTING;
 static char last_sess[32] = "", last_text[64] = "";
 static pl_bubble_t last_bubbles[PL_MAX_BUBBLES];
 static uint8_t last_bubble_n;
+static pl_tokens_t last_tokens;
+static bool last_tokens_valid;
 static int st_n;
 static char hello_ok_ver[32] = "";
 static int hello_ok_n;
 
 static void on_state(pl_status_t st, const char *session, const char *text,
-                     const pl_bubble_t *bubbles, uint8_t bubble_n, void *ctx) {
+                     const pl_bubble_t *bubbles, uint8_t bubble_n,
+                     const pl_tokens_t *tokens, void *ctx) {
   (void)ctx;
   last_st = st;
   snprintf(last_sess, sizeof(last_sess), "%s", session ? session : "(null)");
   snprintf(last_text, sizeof(last_text), "%s", text ? text : "(null)");
   last_bubble_n = bubble_n;
-  memcpy(last_bubbles, bubbles, bubble_n * sizeof(pl_bubble_t));
+  if (bubbles && bubble_n) memcpy(last_bubbles, bubbles, bubble_n * sizeof(pl_bubble_t));
+  last_tokens_valid = tokens != NULL;
+  if (tokens) last_tokens = *tokens;
   st_n++;
 }
 static void on_hello_ok(const char *ver, void *ctx) {
@@ -67,7 +72,7 @@ static void pl_setup(pl_t *pl, const char *id) {
   pl_init(pl, &cbs, NULL, id, "0.1.0");
   reset_tx(); st_n = 0; hello_ok_n = 0; fake_uptime_val = 4242;
   last_st = PL_ST_CONNECTING; last_sess[0] = last_text[0] = '\0';
-  last_bubble_n = 0;
+  last_bubble_n = 0; last_tokens_valid = false;
 }
 
 /** 已握手的会话：pl_start + 喂 hello_ok，返回后设备处于握手完成态 */
@@ -275,6 +280,34 @@ int main(void) {
              "{\"st\":\"done\"},{\"st\":\"done\"},{\"st\":\"done\"},{\"st\":\"error\"}]}");
     feed(&pl, big, 130);
     CHECK(st_n == 4 && last_bubble_n == PL_MAX_BUBBLES, "超上限截断到 6");
+  }
+
+  printf("== 11. F15 token 消耗（协议 §3.4 可选 tokens） ==\n");
+  {
+    pl_setup(&pl, "p4-abc123");
+    handshake(&pl, 0);
+
+    /* 携带 tokens：两数全解析 */
+    feed(&pl, "{\"ver\":1,\"type\":\"state\",\"session\":\"aaa\",\"status\":\"working\","
+              "\"tokens\":{\"ctx\":45123,\"tot\":1234567}}", 100);
+    CHECK(st_n == 1 && last_tokens_valid
+              && last_tokens.ctx == 45123 && last_tokens.tot == 1234567,
+          "tokens ctx/tot 解析");
+
+    /* 未携带 → 无效（UI 隐藏，不用半截数字） */
+    feed(&pl, "{\"ver\":1,\"type\":\"state\",\"session\":\"aaa\",\"status\":\"thinking\"}", 110);
+    CHECK(st_n == 2 && !last_tokens_valid, "未携带 tokens → 无效");
+
+    /* 字段非法（字符串/缺 ctx）：整体无效，不出现半截快照 */
+    feed(&pl, "{\"ver\":1,\"type\":\"state\",\"session\":\"aaa\",\"status\":\"done\","
+              "\"tokens\":{\"ctx\":\"many\",\"tot\":5}}", 120);
+    CHECK(st_n == 3 && !last_tokens_valid, "非法 tokens → 整体无效");
+
+    /* 恢复正常后再次生效（无效态不粘住） */
+    feed(&pl, "{\"ver\":1,\"type\":\"state\",\"session\":\"aaa\",\"status\":\"error\","
+              "\"tokens\":{\"ctx\":715,\"tot\":1935}}", 130);
+    CHECK(st_n == 4 && last_tokens_valid && last_tokens.ctx == 715 && last_tokens.tot == 1935,
+          "无效后恢复正常解析");
   }
 
   printf("\n结果：%d/%d 通过\n", passed, total);

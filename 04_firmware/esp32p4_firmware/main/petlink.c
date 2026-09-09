@@ -220,6 +220,21 @@ static void pl_handle_line(pl_t *pl, const char *line, uint32_t now_ms)
       }
     }
 
+    /* F15 token 消耗（协议 §3.4 可选 tokens 字段）：帧未携带/字段非法则
+     * 整体无效——UI 维持隐藏，不用半截数字 */
+    pl->tokens_valid = false;
+    if (mapped != PL_ST_CONNECTING) {
+      const cJSON *tk = cJSON_GetObjectItem(root, "tokens");
+      const cJSON *tc = cJSON_GetObjectItem(tk, "ctx");
+      const cJSON *tt = cJSON_GetObjectItem(tk, "tot");
+      if (cJSON_IsNumber(tc) && cJSON_IsNumber(tt)
+          && tc->valuedouble >= 0 && tt->valuedouble >= 0) {
+        pl->tokens.ctx = (uint32_t)tc->valuedouble;
+        pl->tokens.tot = (uint32_t)tt->valuedouble;
+        pl->tokens_valid = true;
+      }
+    }
+
     if (mapped != PL_ST_CONNECTING && pl->cbs.on_state) {
       const cJSON *sess = cJSON_GetObjectItem(root, "session");
       const cJSON *text = cJSON_GetObjectItem(root, "text");
@@ -227,6 +242,7 @@ static void pl_handle_line(pl_t *pl, const char *line, uint32_t now_ms)
                        cJSON_GetStringValue((cJSON *)sess),
                        cJSON_GetStringValue((cJSON *)text),
                        pl->bubbles, pl->bubble_n,
+                       pl->tokens_valid ? &pl->tokens : NULL,
                        pl->ctx);
     }
   }

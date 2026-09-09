@@ -220,6 +220,7 @@ static lv_obj_t *s_topbar;      /* 4px 状态条（pet.js fillRect(0,0,W,4)） *
 static lv_obj_t *s_lbl_title;
 static lv_obj_t *s_lbl_session;
 static lv_obj_t *s_bubble[PL_MAX_BUBBLES]; /* F02R 会话气泡行（顶栏右侧下方） */
+static lv_obj_t *s_lbl_tokens;             /* F15 token 底行（底部居中小字） */
 static lv_obj_t *s_halo;        /* 状态色光晕（径向渐变的实心近似） */
 static lv_obj_t *s_dog;         /* 宠物容器：原点=中心，子件用相对负坐标 */
 static lv_obj_t *s_lbl_state;   /* 底部状态胶囊 */
@@ -267,6 +268,15 @@ static void build_page(lv_display_t *disp)
     s_bubble[i] = blob(scr, 0xffffff, 20, 20, -40, -40);
     lv_obj_add_flag(s_bubble[i], LV_OBJ_FLAG_HIDDEN);
   }
+
+  /* F15 token 底行：底部居中常驻小字（纯 ASCII，Montserrat 14），
+   * 帧未带 tokens 字段时隐藏（旧 daemon / 会话无流水） */
+  s_lbl_tokens = lv_label_create(scr);
+  lv_label_set_text(s_lbl_tokens, "");
+  lv_obj_set_style_text_color(s_lbl_tokens, lv_color_hex(COL_TOPTEXT), 0);
+  lv_obj_set_style_text_font(s_lbl_tokens, &lv_font_montserrat_14, 0);
+  lv_obj_align(s_lbl_tokens, LV_ALIGN_BOTTOM_MID, 0, -8);
+  lv_obj_add_flag(s_lbl_tokens, LV_OBJ_FLAG_HIDDEN);
 
   /* 光晕：状态色低不透明度大圆（pet.js 径向渐变的实心近似） */
   s_halo = blob(scr, 0xffffff, X2(130) * 2, X2(130) * 2,
@@ -511,6 +521,42 @@ static void apply_bubbles(const pet_ui_snap_t *snap)
            fi >= 0 ? pl_status_name(snap->bubbles[fi].st) : "-");
 }
 
+/* F15 token 底行：缩写格式化（45123→45.1k，1234567→1.2M），纯 ASCII */
+static void fmt_tok(char *out, size_t n, uint32_t v)
+{
+  if (v >= 1000000u) {
+    snprintf(out, n, "%u.%uM", (unsigned)(v / 1000000u), (unsigned)((v % 1000000u) / 100000u));
+  } else if (v >= 1000u) {
+    snprintf(out, n, "%u.%uk", (unsigned)(v / 1000u), (unsigned)((v % 1000u) / 100u));
+  } else {
+    snprintf(out, n, "%u", (unsigned)v);
+  }
+}
+
+/* F15 token 底行：签名（有效位+ctx+tot）不变则跳过；无效=隐藏 */
+static void apply_tokens(const pet_ui_snap_t *snap)
+{
+  struct sig_t { uint8_t valid; uint32_t ctx; uint32_t tot; } sig;
+  sig.valid = snap->tokens_valid ? 1 : 0;
+  sig.ctx = snap->tokens_valid ? snap->tokens.ctx : 0;
+  sig.tot = snap->tokens_valid ? snap->tokens.tot : 0;
+  static struct sig_t last; /* 零初值=无效态，与建页时的隐藏一致 */
+  if (memcmp(&sig, &last, sizeof(sig)) == 0) return;
+  last = sig;
+
+  if (!sig.valid) {
+    lv_obj_add_flag(s_lbl_tokens, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+  char a[12], b[12], line[40];
+  fmt_tok(a, sizeof(a), sig.ctx);
+  fmt_tok(b, sizeof(b), sig.tot);
+  snprintf(line, sizeof(line), "ctx %s / tot %s", a, b);
+  lv_label_set_text(s_lbl_tokens, line);
+  lv_obj_clear_flag(s_lbl_tokens, LV_OBJ_FLAG_HIDDEN);
+  ESP_LOGI(TAG, "pet_ui: tokens ctx=%u tot=%u", (unsigned)sig.ctx, (unsigned)sig.tot);
+}
+
 /* ---------------- 每拍动画（相位公式与 pet.js 逐字对齐） ---------------- */
 
 static void anim_step(pl_status_t st, uint32_t t)
@@ -621,6 +667,7 @@ static void ui_tick(lv_timer_t *tmr)
   }
 
   apply_bubbles(&snap); /* 签名 diff 内部跳过，每拍调用的开销可忽略 */
+  apply_tokens(&snap); /* F15 同款签名 diff */
 }
 
 /* ---------------- LVGL 任务 ---------------- */

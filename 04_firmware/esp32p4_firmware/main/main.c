@@ -72,13 +72,15 @@ static void copy_utf8_bounded(char *dst, size_t cap, const char *src)
 }
 
 static void ui_on_state(pl_status_t st, const char *session, const char *text,
-                        const pl_bubble_t *bubbles, uint8_t bubble_n, void *ctx)
+                        const pl_bubble_t *bubbles, uint8_t bubble_n,
+                        const pl_tokens_t *tokens, void *ctx)
 {
   (void)ctx;
   g_last_status = st;
-  ESP_LOGI(TAG, "[ui] %s  session=%s  text=%s  bubbles=%u",
+  ESP_LOGI(TAG, "[ui] %s  session=%s  text=%s  bubbles=%u  tokens=%s",
            pl_status_name(st), session ? session : "-", text ? text : "-",
-           bubbles ? bubble_n : 0);
+           bubbles ? bubble_n : 0,
+           tokens ? "y" : "-");
   pet_ui_snap_t snap = {
     .state = st,
     .link_live = g_pl.helloed,
@@ -89,6 +91,8 @@ static void ui_on_state(pl_status_t st, const char *session, const char *text,
   if (bubbles && bubble_n > PL_MAX_BUBBLES) bubble_n = PL_MAX_BUBBLES;
   snap.bubble_n = bubble_n;
   if (bubbles && bubble_n) memcpy(snap.bubbles, bubbles, bubble_n * sizeof(pl_bubble_t));
+  snap.tokens_valid = tokens != NULL;
+  if (tokens) snap.tokens = *tokens;
   pet_ui_push(&snap);
 }
 
@@ -189,7 +193,7 @@ static void petlink_task(void *arg)
   snprintf(dev_id, sizeof(dev_id), "p4-%02x%02x%02x", mac[3], mac[4], mac[5]);
 
   pl_cbs_t cbs = { io_send, ui_on_state, ui_on_hello_ok, io_uptime };
-  pl_init(&g_pl, &cbs, NULL, dev_id, "0.5.0");
+  pl_init(&g_pl, &cbs, NULL, dev_id, "0.6.0");
 
   vTaskDelay(pdMS_TO_TICKS(100)); /* 桥接芯片无枚举等待，留个稳定裕量 */
   pl_start(&g_pl, io_uptime(NULL));
