@@ -65,14 +65,17 @@ void spk_alert(pl_status_t st)
   if (s_task) xTaskNotifyGive(s_task);
 }
 
-/* 合成一段正弦到 out（含首尾包络），返回写入的样本数 */
+/* 合成一段正弦到 out（含首尾包络），返回写入的样本数。
+ * ⚠️ 帧格式是 stereo 交错（L,R 同值）：ES8311 DAC 收立体声左槽，
+ * mono 槽（slot_mask 单槽）实测无声（2026-09-10 真机踩坑），
+ * 官方样例同款 stereo 口径 */
 static unsigned synth_seg(int16_t *out, unsigned cap, unsigned freq, unsigned dur_ms)
 {
-  const unsigned n = dur_ms * SPK_RATE_HZ / 1000;
-  if (n == 0 || n > cap) return 0;
+  const unsigned n = dur_ms * SPK_RATE_HZ / 1000; /* 单声道样本数 */
+  if (n == 0 || n * 2 > cap) return 0;
   if (freq == 0) {
-    memset(out, 0, n * sizeof(int16_t)); /* 静音间隔 */
-    return n;
+    memset(out, 0, n * 2 * sizeof(int16_t)); /* 静音间隔 */
+    return n * 2;
   }
   const unsigned env = SPK_ENV_MS * SPK_RATE_HZ / 1000;
   const float w = 2.0f * (float)M_PI * (float)freq / (float)SPK_RATE_HZ;
@@ -81,15 +84,17 @@ static unsigned synth_seg(int16_t *out, unsigned cap, unsigned freq, unsigned du
     float g = 1.0f; /* 梯形包络：5ms 淡入/淡出 */
     if (i < env) g = (float)i / (float)env;
     else if (i > n - 1 - env && n > env) g = (float)(n - 1 - i) / (float)env;
-    out[i] = (int16_t)(sinf(w * (float)i) * amp * g);
+    const int16_t v = (int16_t)(sinf(w * (float)i) * amp * g);
+    out[i * 2] = v;     /* L */
+    out[i * 2 + 1] = v; /* R */
   }
-  return n;
+  return n * 2;
 }
 
 static void spk_task(void *arg)
 {
   (void)arg;
-  static int16_t pcm[SPK_RATE_HZ / 2]; /* 500ms 上限 ≈ 16KB，内部 RAM 常驻 */
+  static int16_t pcm[SPK_RATE_HZ / 2]; /* 500ms 上限（stereo 交错后 ≈16KB） */
 
   esp_codec_dev_handle_t dev = NULL; /* 自检音与状态提示音共用一次播放流程 */
   for (;;) {
@@ -121,11 +126,11 @@ play: /* 自检音与状态提示音共用一次播放流程 */
     const seg_t *segs = k_alert[s_pending];
     unsigned n = 0;
     for (unsigned i = 0; i < 3; i++)
-      n += synth_seg(pcm + n, SPK_RATE_HZ / 2 - n, segs[i].freq, segs[i].dur_ms);
+      n += synth_seg(pcm + n, SPK_RATE_HZ / 4 - n, segs[i].freq, segs[i].dur_ms);
 
     esp_codec_dev_sample_info_t fs = {
       .bits_per_sample = 16,
-      .channel = 1,
+      .channel = 2, /* stereo 槽（DAC 收左槽，mono 单槽实测无声） */
       .sample_rate = SPK_RATE_HZ,
     };
     int ret = esp_codec_dev_open(dev, &fs);
