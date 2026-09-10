@@ -29,14 +29,13 @@ curl -X POST http://127.0.0.1:7331/usb/resume
 curl -sX POST localhost:7331/state -H 'Content-Type: application/json' -d '{"event":"Stop","session_id":"sess-a"}'
 ```
 
-✅ 屏变 done；monitor 若还开着应有：
+✅ 屏变 done。**此处无声属预期**（喇叭没接，NS4150 空载），日志也看不到——
+monitor 和 daemon 抢 USB 口不能同开（a 步看完已退出），听声阶段声音本身就是判据。
 
-```
-I (xxx) audio_hw: ES8311 就绪（ADC+DAC）：I2C 0x18 @ SCL=8/SDA=7，... DOUT=9，PA=53
-I (xxx) spk: 提示音：完成（n 样本，vol=70）
-```
-
-> 没开 monitor 也行——这步屏变 done + 下一步听声就够。**此处无声属预期**（喇叭没接，NS4150 空载）。
+> 想看 `audio_hw: ES8311 就绪（ADC+DAC）` / `spk: 提示音：完成` 这两行日志的替代办法：
+> 暂停 daemon（`curl -X POST http://127.0.0.1:7331/usb/pause`）→ 终端 B `idf.py -p /dev/cu.usbmodem5B910634541 monitor`
+> → 但此时 daemon 断开、状态帧到不了板子，得手动拔插 USB 触发重连重放才能听到一次提示音——
+> 没必要折腾，跳过即可。
 
 ### c. [ ] 防吵验证：同状态重复帧不响
 
