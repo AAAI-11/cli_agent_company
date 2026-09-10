@@ -90,7 +90,7 @@ menu "PetLink"
         config PETLINK_SPK_VOLUME
             int "提示音音量（ES8311 DAC 数字音量）"
             range 0 100
-            default 70
+            default 80
             help
                 NS4150 3W D 类增益不低，小喇叭 70 挺响；夜里编码可调 30。
 

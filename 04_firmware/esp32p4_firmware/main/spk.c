@@ -50,6 +50,7 @@ static TaskHandle_t s_task;
 static volatile bool s_busy;
 static volatile pl_status_t s_pending = PL_ST_CONNECTING; /* 待播状态（通知携带） */
 static pl_status_t s_last_seen = PL_ST_CONNECTING;        /* 去重：上一次见到的状态 */
+static bool s_selftest = true; /* 开机自检音只播一次 */
 
 bool spk_busy(void) { return s_busy; }
 
@@ -89,16 +90,34 @@ static void spk_task(void *arg)
 {
   (void)arg;
   static int16_t pcm[SPK_RATE_HZ / 2]; /* 500ms 上限 ≈ 16KB，内部 RAM 常驻 */
+
+  esp_codec_dev_handle_t dev = NULL; /* 自检音与状态提示音共用一次播放流程 */
   for (;;) {
+    if (dev == NULL) { /* 首轮（自检）或上一轮装配失败时重新尝试 */
+      if (mic_busy()) { /* 录音优先：整段丢弃，不排队（grill 定稿） */
+        ESP_LOGD(TAG, "录音中，丢弃提示音");
+        continue;
+      }
+      dev = audio_hw_init() ? audio_hw_out() : NULL;
+      if (!dev) continue; /* ES8311 不在位，静默降级（audio_hw 已记日志） */
+    }
+
+    if (s_selftest) { /* 首轮：开机自检音（2s 延时后无条件一声） */
+      vTaskDelay(pdMS_TO_TICKS(2000));
+      s_selftest = false;
+      s_pending = PL_ST_DONE;
+      ESP_LOGI(TAG, "开机自检音：开始（听不到即链路/PA 问题，见日志）");
+      goto play;
+    }
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
     if (mic_busy()) { /* 录音优先：整段丢弃，不排队（grill 定稿） */
       ESP_LOGD(TAG, "录音中，丢弃提示音");
       continue;
     }
-    esp_codec_dev_handle_t dev = audio_hw_init() ? audio_hw_out() : NULL;
-    if (!dev) continue; /* ES8311 不在位，静默降级（audio_hw 已记日志） */
 
+play: /* 自检音与状态提示音共用一次播放流程 */
+    {
     const seg_t *segs = k_alert[s_pending];
     unsigned n = 0;
     for (unsigned i = 0; i < 3; i++)
@@ -110,22 +129,31 @@ static void spk_task(void *arg)
       .sample_rate = SPK_RATE_HZ,
     };
     int ret = esp_codec_dev_open(dev, &fs);
+    ESP_LOGI(TAG, "open ret=%d（0=成功）", ret);
     if (ret == 0) {
       s_busy = true;
-      esp_codec_dev_set_out_vol(dev, (float)CONFIG_PETLINK_SPK_VOLUME);
-      ESP_LOGI(TAG, "提示音：%s（%u 样本，vol=%d）",
-               pl_status_name(s_pending), n, CONFIG_PETLINK_SPK_VOLUME);
+      int vret = esp_codec_dev_set_out_vol(dev, (float)CONFIG_PETLINK_SPK_VOLUME);
+      ESP_LOGI(TAG, "提示音：%s（%u 样本，vol=%d，set_out_vol ret=%d）",
+               pl_status_name(s_pending), n, CONFIG_PETLINK_SPK_VOLUME, vret);
       /* 16KB 一次 write 太大（DMA 环 7.7KB），2KB 分块喂（接口参数不带 const） */
       uint8_t *p = (uint8_t *)pcm;
       size_t left = n * sizeof(int16_t);
-      while (left > 0 && (ret = esp_codec_dev_write(dev, p, left > 2048 ? 2048 : left)) == 0) {
-        p += left > 2048 ? 2048 : left;
-        left -= left > 2048 ? 2048 : left;
+      size_t wrote = 0;
+      while (left > 0) {
+        size_t chunk = left > 2048 ? 2048 : left;
+        ret = esp_codec_dev_write(dev, p, chunk);
+        if (ret != 0) break;
+        p += chunk;
+        left -= chunk;
+        wrote += chunk;
       }
+      ESP_LOGI(TAG, "write 完成：%uB / %uB（ret=%d）", (unsigned)wrote,
+               (unsigned)(n * sizeof(int16_t)), ret);
       esp_codec_dev_close(dev); /* close 自动静音+关 PA（防爆破音时序） */
       s_busy = false;
     }
     if (ret != 0) ESP_LOGW(TAG, "提示音播放失败（ret=%d）——不影响状态主链路", ret);
+    }
   }
 }
 
