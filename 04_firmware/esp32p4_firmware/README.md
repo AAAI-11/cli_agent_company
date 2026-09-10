@@ -132,9 +132,14 @@ daemon 没在跑就跳过 pause/resume 两步（或者干脆停掉再烧也行�
 
 **中文字体再生成**（改标签/加符号时，命令与 `ui_map.h` 的 `PET_FONT_SYMBOLS` 逐字一致）：
 
+⚠️ 字体源用 **NotoSansSC-Regular.otf**（OFL 开源，拉丁+CJK 全覆盖）。
+别用 AOSP 的 DroidSansFallback.ttf——它**不含拉丁字形**（2026-09-09 踩坑：
+重新生成后 `token` 五个字母全变豆腐块），拉丁字形在 AOSP 里已随 DroidSans.ttf
+一起移除。Noto 获取：`https://cdn.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/SubsetOTF/SC/NotoSansSC-Regular.otf`
+
 ```bash
 npx --yes lv_font_conv --no-compress --no-prefilter --bpp 4 --size 32 \
-  --font DroidSansFallback.ttf -r 0x20-0x7F \
+  --font NotoSansSC-Regular.otf -r 0x20-0x7F \
   --symbols "思考中干活等你拍板完成了出错正在连接★！…" \
   --format lvgl --force-fast-kern-format -o main/font_pet_32.c
 ```

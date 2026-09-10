@@ -5,9 +5,11 @@
   python3 tools/gen_font_text.py --symbols     打印去重后的符号串（喂给 lv_font_conv --symbols）
   python3 tools/gen_font_text.py --header      生成 main/font_text_symbols.h（宿主测试锚定覆盖）
 
-字体再生成（README v0.3 章节同款命令）：
+字体再生成（字体源用 NotoSansSC，OFL 开源；DroidSansFallback 不含拉丁
+字形，2026-09-09 踩坑——重新生成后 token 五个字母全变豆腐块。
+获取：https://cdn.jsdelivr.net/gh/notofonts/noto-cjk@main/Sans/SubsetOTF/SC/NotoSansSC-Regular.otf）：
   npx --yes lv_font_conv --no-compress --no-prefilter --bpp 1 --size 24 \\
-    --font /tmp/DroidSansFallback.ttf -r 0x20-0x7F \\
+    --font /tmp/NotoSansSC-Regular.otf -r 0x20-0x7F \\
     --symbols "$(python3 tools/gen_font_text.py --symbols)" \\
     --format lvgl --force-fast-kern-format -o main/font_pet_text_24.c
 
