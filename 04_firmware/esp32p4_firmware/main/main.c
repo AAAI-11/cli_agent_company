@@ -32,6 +32,7 @@
 #include "disp_dsi.h"
 #include "pet_ui.h"
 #include "mic.h"
+#include "spk.h"
 
 static const char *TAG = "petlink";
 
@@ -77,6 +78,7 @@ static void ui_on_state(pl_status_t st, const char *session, const char *text,
 {
   (void)ctx;
   g_last_status = st;
+  spk_alert(st); /* F16 状态提示音：三态转移触发（同状态去重在 spk.c） */
   ESP_LOGI(TAG, "[ui] %s  session=%s  text=%s  bubbles=%u  tokens=%s",
            pl_status_name(st), session ? session : "-", text ? text : "-",
            bubbles ? bubble_n : 0,
@@ -193,11 +195,12 @@ static void petlink_task(void *arg)
   snprintf(dev_id, sizeof(dev_id), "p4-%02x%02x%02x", mac[3], mac[4], mac[5]);
 
   pl_cbs_t cbs = { io_send, ui_on_state, ui_on_hello_ok, io_uptime };
-  pl_init(&g_pl, &cbs, NULL, dev_id, "0.6.0");
+  pl_init(&g_pl, &cbs, NULL, dev_id, "0.7.0");
 
   vTaskDelay(pdMS_TO_TICKS(100)); /* 桥接芯片无枚举等待，留个稳定裕量 */
   pl_start(&g_pl, io_uptime(NULL));
   g_mic_ok = mic_init(&g_pl); /* 语音输入：录音任务 + audio 帧上行句柄 */
+  if (!spk_init()) ESP_LOGW(TAG, "状态提示音不可用（编译关或任务创建失败）");
   ESP_LOGI(TAG, "PetLink v%d 已启动 device=%s", PL_VER, dev_id);
 
   uint8_t rxbuf[512];

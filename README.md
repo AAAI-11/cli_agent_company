@@ -10,7 +10,7 @@ PC 侧一个 Node daemon 归一化 Claude Code hooks 事件，经自研 PetLink 
 **口径**：宪法文档为 [`01_需求与方案/需求说明文档.md`](01_需求与方案/需求说明文档.md)（v3.1）。
 范围冻结于 F01 状态可视化 / F03 实体键授权仲裁 / F05 自研 NDJSON 协议 / F06 Node daemon；
 语音输入 / 语音输出 / 会话统计经 grill 流程补入宪法 v3.1，§4.2 Stretch 多会话气泡（F02R）
-与 token 消耗显示（F15，v3.2 增补）亦已落地——宪法功能清单全部完成；组件化 GUI、MQTT、
+与 token 消耗显示（F15，v3.2 增补）与状态提示音（F16，v3.3 增补）亦已落地——宪法功能清单全部完成；组件化 GUI、MQTT、
 自绘 PCB 等开题阶段设想仍裁剪（开题旧稿已删，取舍过程见宪法与 git 历史）。
 
 ## 快速上手
@@ -72,6 +72,9 @@ cd daemon && npm install && npm start    # 起 daemon（macOS 需已装 Node 18+
 - [x] v0.6 token 消耗显示（2026-09-09，F15，宪法 v3.2）：daemon 增量解析各会话
       transcript 的 usage → state 帧可选 `tokens` 字段 → 实体板/虚拟设备底部
       常驻 `ctx/tot` 小字——成本透明，与 F13 统计连成"可度量"叙事线
+- [x] v0.7 状态提示音（2026-09-09，F16，宪法 v3.3）：waiting_confirm/done/error
+      转移时板上播放合成提示音（ES8311 DAC + NS4150 功放，外接 8Ω 无源喇叭）；
+      与 daemon 侧 TTS（F12）同触发集分层互补；录音优先，mic 忙时提示音丢弃
 - [ ] 冲刺：演示材料、答辩准备、**提交前仓库公开**（创新叙事 = 真开源补完）
 
 ## 协作与工具

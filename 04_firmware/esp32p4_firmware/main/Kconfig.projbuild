@@ -75,6 +75,27 @@ menu "PetLink"
 
     endmenu
 
+    menu "PetLink 状态提示音"
+
+        config PETLINK_SPK_ENABLED
+            bool "板载喇叭状态提示音（F16）"
+            default y
+            help
+                waiting_confirm/done/error 状态转移时，经板载 ES8311 DAC +
+                NS4150 功放（PA_Ctrl=GPIO53，外接 8Ω 无源喇叭）播放正弦
+                合成提示音；与 daemon 侧 TTS（F12）同触发集。同状态重复
+                帧不响；录音（F14）优先，mic 忙时提示音直接丢弃。硬件装配
+                与录音共用 audio_hw.c 的 duplex I2S + 单颗 codec。
+
+        config PETLINK_SPK_VOLUME
+            int "提示音音量（ES8311 DAC 数字音量）"
+            range 0 100
+            default 70
+            help
+                NS4150 3W D 类增益不低，小喇叭 70 挺响；夜里编码可调 30。
+
+    endmenu
+
     menu "PetLink 语音输入"
 
         config PETLINK_MIC_ENABLED

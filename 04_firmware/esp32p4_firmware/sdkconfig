@@ -1349,6 +1349,15 @@ CONFIG_PETLINK_UI_PNG=y
 # end of PetLink UI
 
 #
+# PetLink 状态提示音
+#
+# default:
+CONFIG_PETLINK_SPK_ENABLED=y
+# default:
+CONFIG_PETLINK_SPK_VOLUME=70
+# end of PetLink 状态提示音
+
+#
 # PetLink 语音输入
 #
 # default:
