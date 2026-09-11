@@ -25,11 +25,11 @@ function normalizeHook(body) {
   const event = body.event || body.hook_event_name || '';
   let status = HOOK_MAP[event];
 
-  // Notification 需要语义消歧：permission 类通知 → waiting_confirm
+  // Notification 语义消歧：notif（测试 curl）/ notification_type（petlink-hook
+  // 转发字段）→ 五态。error 类 → error；permission/其余闲聊类 → waiting_confirm
   if (event === 'Notification') {
-    const msg = String(body.message || '');
-    status = /permission|approve|授权|允许/i.test(msg) ? 'waiting_confirm' : 'waiting_confirm';
-    // v1 简化：Notification 一律 waiting_confirm（闲聊类通知后续再细分）
+    const kind = String(body.notif || body.notification_type || '').toLowerCase();
+    status = kind === 'error' ? 'error' : 'waiting_confirm';
   }
   if (!status) return null;
 

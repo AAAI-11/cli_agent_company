@@ -195,7 +195,7 @@ static void petlink_task(void *arg)
   snprintf(dev_id, sizeof(dev_id), "p4-%02x%02x%02x", mac[3], mac[4], mac[5]);
 
   pl_cbs_t cbs = { io_send, ui_on_state, ui_on_hello_ok, io_uptime };
-  pl_init(&g_pl, &cbs, NULL, dev_id, "0.7.0");
+  pl_init(&g_pl, &cbs, NULL, dev_id, "0.7.1");
 
   vTaskDelay(pdMS_TO_TICKS(100)); /* 桥接芯片无枚举等待，留个稳定裕量 */
   pl_start(&g_pl, io_uptime(NULL));

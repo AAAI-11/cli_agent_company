@@ -121,6 +121,13 @@ static esp_err_t audio_hw_assemble(void)
     .digital_mic = false, /* 板载模拟麦 */
     .no_dac_ref = true,   /* 单声道，右槽留空 */
     .mclk_div = 256,
+    /* 硬件增益补偿：不填时组件按“PA 5V/DAC 3.3V”默认压 -4.36dB，
+     * 本板 NS4150 与 codec 同 3.3V 供电，pa_voltage 填实测值即抵消 */
+    .hw_gain = {
+      .pa_voltage = 3.3,
+      .codec_dac_voltage = 3.3,
+      .pa_gain = 0.0,
+    },
   };
   const audio_codec_if_t *codec_if = es8311_codec_new(&es_cfg);
   if (!codec_if) return ESP_FAIL;

@@ -148,6 +148,10 @@ async function main() {
       JSON.stringify(bub?.bubbles));
     const rb3 = await post6b({ event: 'Notification', session_id: 'sess-b2', message: 'Claude needs your permission' });
     check('F02R waiting_confirm 抢占焦点', rb3.ok && rb3.focus === 'sess-b2', `focus=${rb3.focus}`);
+    // Notification 语义消歧（F12/F16 触发集）：notif=error → error 态，
+    // 不再被 v1 简化一律吞成 waiting_confirm（2026-09-04 真机：error 提示音不响）
+    const rbErr = await post6b({ event: 'Notification', session_id: 'sess-b2', notif: 'error', message: 'boom' });
+    check('Notification notif=error 归一为 error 态', rbErr.ok && rbErr.status === 'error', `status=${rbErr.status}`);
     // 空闲态 NO 键：此刻无 permission 挂起（前面都已决出），按键落到焦点循环
     const rxBefore = rx.length;
     ws.send(JSON.stringify({ ver: 1, type: 'button', key: 'no', event: 'short' }));

@@ -39,10 +39,11 @@ typedef struct {
   unsigned dur_ms;
 } seg_t;
 
-/* 三态音色（宪法 §4.6 定稿；触发集与 F12 播报集一致） */
+/* 三态音色（宪法 §4.6 定稿；触发集与 F12 播报集一致）。
+ * 总时长 ≤250ms：stereo 交错后须装进 pcm[SPK_RATE_HZ/2]（4000 mono 样本） */
 static const seg_t k_alert[][3] = {
   [PL_ST_WAITING_CONFIRM] = { { 880, 90 }, { 0, 70 }, { 880, 90 } },
-  [PL_ST_DONE]            = { { 587, 90 }, { 0, 40 }, { 880, 140 } },
+  [PL_ST_DONE]            = { { 587, 80 }, { 0, 40 }, { 880, 120 } },
   [PL_ST_ERROR]           = { { 330, 220 }, { 0, 0 }, { 0, 0 } },
 };
 
@@ -50,7 +51,6 @@ static TaskHandle_t s_task;
 static volatile bool s_busy;
 static volatile pl_status_t s_pending = PL_ST_CONNECTING; /* 待播状态（通知携带） */
 static pl_status_t s_last_seen = PL_ST_CONNECTING;        /* 去重：上一次见到的状态 */
-static bool s_selftest = true; /* 开机自检音只播一次 */
 
 bool spk_busy(void) { return s_busy; }
 
@@ -79,7 +79,7 @@ static unsigned synth_seg(int16_t *out, unsigned cap, unsigned freq, unsigned du
   }
   const unsigned env = SPK_ENV_MS * SPK_RATE_HZ / 1000;
   const float w = 2.0f * (float)M_PI * (float)freq / (float)SPK_RATE_HZ;
-  const float amp = 0.6f * 32767.0f;
+  const float amp = 0.9f * 32767.0f;
   for (unsigned i = 0; i < n; i++) {
     float g = 1.0f; /* 梯形包络：5ms 淡入/淡出 */
     if (i < env) g = (float)i / (float)env;
@@ -96,9 +96,9 @@ static void spk_task(void *arg)
   (void)arg;
   static int16_t pcm[SPK_RATE_HZ / 2]; /* 500ms 上限（stereo 交错后 ≈16KB） */
 
-  esp_codec_dev_handle_t dev = NULL; /* 自检音与状态提示音共用一次播放流程 */
+  esp_codec_dev_handle_t dev = NULL;
   for (;;) {
-    if (dev == NULL) { /* 首轮（自检）或上一轮装配失败时重新尝试 */
+    if (dev == NULL) { /* 上一轮装配失败时重新尝试 */
       if (mic_busy()) { /* 录音优先：整段丢弃，不排队（grill 定稿） */
         ESP_LOGD(TAG, "录音中，丢弃提示音");
         continue;
@@ -106,27 +106,17 @@ static void spk_task(void *arg)
       dev = audio_hw_init() ? audio_hw_out() : NULL;
       if (!dev) continue; /* ES8311 不在位，静默降级（audio_hw 已记日志） */
     }
-
-    if (s_selftest) { /* 首轮：开机自检音（2s 延时后无条件一声） */
-      vTaskDelay(pdMS_TO_TICKS(2000));
-      s_selftest = false;
-      s_pending = PL_ST_DONE;
-      ESP_LOGI(TAG, "开机自检音：开始（听不到即链路/PA 问题，见日志）");
-      goto play;
-    }
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
     if (mic_busy()) { /* 录音优先：整段丢弃，不排队（grill 定稿） */
       ESP_LOGD(TAG, "录音中，丢弃提示音");
       continue;
     }
-
-play: /* 自检音与状态提示音共用一次播放流程 */
     {
     const seg_t *segs = k_alert[s_pending];
     unsigned n = 0;
     for (unsigned i = 0; i < 3; i++)
-      n += synth_seg(pcm + n, SPK_RATE_HZ / 4 - n, segs[i].freq, segs[i].dur_ms);
+      n += synth_seg(pcm + n, SPK_RATE_HZ / 2 - n, segs[i].freq, segs[i].dur_ms);
 
     esp_codec_dev_sample_info_t fs = {
       .bits_per_sample = 16,
@@ -134,26 +124,24 @@ play: /* 自检音与状态提示音共用一次播放流程 */
       .sample_rate = SPK_RATE_HZ,
     };
     int ret = esp_codec_dev_open(dev, &fs);
-    ESP_LOGI(TAG, "open ret=%d（0=成功）", ret);
     if (ret == 0) {
       s_busy = true;
-      int vret = esp_codec_dev_set_out_vol(dev, (float)CONFIG_PETLINK_SPK_VOLUME);
-      ESP_LOGI(TAG, "提示音：%s（%u 样本，vol=%d，set_out_vol ret=%d）",
-               pl_status_name(s_pending), n, CONFIG_PETLINK_SPK_VOLUME, vret);
+      esp_codec_dev_set_out_vol(dev, (float)CONFIG_PETLINK_SPK_VOLUME);
+      ESP_LOGI(TAG, "提示音：%s（%u 样本，vol=%d）",
+               pl_status_name(s_pending), n, CONFIG_PETLINK_SPK_VOLUME);
       /* 16KB 一次 write 太大（DMA 环 7.7KB），2KB 分块喂（接口参数不带 const） */
       uint8_t *p = (uint8_t *)pcm;
       size_t left = n * sizeof(int16_t);
-      size_t wrote = 0;
       while (left > 0) {
         size_t chunk = left > 2048 ? 2048 : left;
         ret = esp_codec_dev_write(dev, p, chunk);
         if (ret != 0) break;
         p += chunk;
         left -= chunk;
-        wrote += chunk;
       }
-      ESP_LOGI(TAG, "write 完成：%uB / %uB（ret=%d）", (unsigned)wrote,
-               (unsigned)(n * sizeof(int16_t)), ret);
+      /* write 返回≠播完：数据还在 DMA 环里往外送，而 i2s_channel_disable
+       * 是立即停振不排空——必须等真实时长走完再 close（否则尾音被掐+提前静音） */
+      vTaskDelay(pdMS_TO_TICKS((n / 2) * 1000 / SPK_RATE_HZ + 20));
       esp_codec_dev_close(dev); /* close 自动静音+关 PA（防爆破音时序） */
       s_busy = false;
     }
