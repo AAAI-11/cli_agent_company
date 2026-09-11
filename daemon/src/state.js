@@ -26,10 +26,16 @@ function normalizeHook(body) {
   let status = HOOK_MAP[event];
 
   // Notification 语义消歧：notif（测试 curl）/ notification_type（petlink-hook
-  // 转发字段）→ 五态。error 类 → error；permission/其余闲聊类 → waiting_confirm
+  // 转发字段）→ 五态。error 类 → error；permission 类（真值或 message 兜底）→
+  // waiting_confirm；idle 等闲聊类不转移状态——2026-09-11 真机：空闲约 60s 后
+  // Claude Code 发 "Claude is waiting for your input"，一律吞成 waiting_confirm
+  // 会把屏锁死在「等你拍板」（无 permission waiter，按键救不回）
   if (event === 'Notification') {
     const kind = String(body.notif || body.notification_type || '').toLowerCase();
-    status = kind === 'error' ? 'error' : 'waiting_confirm';
+    const msg = String(body.message || '').toLowerCase();
+    if (kind.includes('error')) status = 'error';
+    else if (kind.includes('permission') || msg.includes('permission')) status = 'waiting_confirm';
+    else return null; // idle 等闲聊通知：不改变当前状态
   }
   if (!status) return null;
 

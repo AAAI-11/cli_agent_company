@@ -152,6 +152,13 @@ async function main() {
     // 不再被 v1 简化一律吞成 waiting_confirm（2026-09-04 真机：error 提示音不响）
     const rbErr = await post6b({ event: 'Notification', session_id: 'sess-b2', notif: 'error', message: 'boom' });
     check('Notification notif=error 归一为 error 态', rbErr.ok && rbErr.status === 'error', `status=${rbErr.status}`);
+    // idle 通知不转移状态（2026-09-11 真机：Claude is waiting for your input 被吞成
+    // waiting_confirm，屏锁死「等你拍板」按键救不回）——须返回 unmapped_event 忽略
+    const rbIdle = await post6b({ event: 'Notification', session_id: 'sess-b2', notification_type: 'idle', message: 'Claude is waiting for your input' });
+    check('Notification idle 闲聊类被忽略（不产生假 waiting_confirm）', !rbIdle.ok && rbIdle.err === 'unmapped_event', JSON.stringify(rbIdle));
+    // 真实 hook 转发路径的 permission（notification_type 字段 + message）→ 仍须 waiting_confirm
+    const rbPerm = await post6b({ event: 'Notification', session_id: 'sess-b2', notification_type: 'permission', message: 'Claude needs your permission to use Bash' });
+    check('Notification notification_type=permission 归一为 waiting_confirm', rbPerm.ok && rbPerm.status === 'waiting_confirm', `status=${rbPerm.status}`);
     // 空闲态 NO 键：此刻无 permission 挂起（前面都已决出），按键落到焦点循环
     const rxBefore = rx.length;
     ws.send(JSON.stringify({ ver: 1, type: 'button', key: 'no', event: 'short' }));
