@@ -132,6 +132,16 @@ function createHttpServer({ registry, links, perms, inject, stats, voice, focus,
       if (!body) return json(400, { ok: false, err: 'bad_json' });
       const eventName = body.event || body.hook_event_name || '';
       stats.event(eventName);
+      // SessionEnd：会话退出（用户输 exit / Ctrl+C 两下）→ 摘除会话并重播焦点帧。
+      // 2026-09-11 真机：终端关掉后气泡赖着不走的元凶之一（退出无通知）。
+      // 兜底：粗暴关窗没有 SessionEnd，由 registry 的非 done 态 TTL 清理。
+      if (eventName === 'SessionEnd') {
+        const gone = String(body.session_id || body.session || '').slice(0, 64);
+        if (registry.remove(gone)) log(`[state] 会话退出 → 摘除 ${gone.slice(0, 8)}`);
+        const rf = focus.reframe();
+        if (rf) links.broadcast(rf);
+        return json(202, { ok: true, removed: gone, focus: rf ? rf.session : null });
+      }
       const norm = normalizeHook(body);
       if (!norm) return json(422, { ok: false, err: 'unmapped_event', event: eventName || null });
       const session = String(body.session_id || body.session || 'default').slice(0, 64);

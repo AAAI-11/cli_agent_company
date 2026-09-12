@@ -59,9 +59,12 @@ class FocusManager {
   /**
    * 无新事件、按注册表现状重组焦点帧（F15 的 5s 轮询刷新路径：
    * transcript 在长而 hook 事件未到，token 数也得动）。
+   * 焦点已死（SessionEnd 摘除/TTL 清理）→ 回落最新存活会话——
+   * 注意不能把死焦点当 incoming 传自己（09-11 踩过：又选回死人，帧恒 null）。
    */
   reframe() {
-    this._ensureFocus(this.focus);
+    if (this.focus && !this._live().some((s) => s.session === this.focus)) this.focus = null;
+    this._ensureFocus(null);
     const f = this.focus && this._live().find((s) => s.session === this.focus);
     return f ? this._out(f) : null;
   }

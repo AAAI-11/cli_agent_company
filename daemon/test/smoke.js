@@ -159,6 +159,10 @@ async function main() {
     // 真实 hook 转发路径的 permission（notification_type 字段 + message）→ 仍须 waiting_confirm
     const rbPerm = await post6b({ event: 'Notification', session_id: 'sess-b2', notification_type: 'permission', message: 'Claude needs your permission to use Bash' });
     check('Notification notification_type=permission 归一为 waiting_confirm', rbPerm.ok && rbPerm.status === 'waiting_confirm', `status=${rbPerm.status}`);
+    // SessionEnd：会话退出摘除 + 焦点回落（2026-09-11 真机：终端关掉气泡赖着不走）
+    const rbEnd = await post6b({ event: 'SessionEnd', session_id: 'sess-b2' });
+    check('SessionEnd 摘除会话并重播焦点帧（焦点回落他人）',
+      rbEnd.ok && rbEnd.removed === 'sess-b2' && rbEnd.focus && rbEnd.focus !== 'sess-b2', JSON.stringify(rbEnd));
     // 空闲态 NO 键：此刻无 permission 挂起（前面都已决出），按键落到焦点循环
     const rxBefore = rx.length;
     ws.send(JSON.stringify({ ver: 1, type: 'button', key: 'no', event: 'short' }));

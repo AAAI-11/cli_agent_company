@@ -22,7 +22,7 @@ const os = require('os');
 const PERM_URL = 'http://127.0.0.1:7331/permission';
 const OUR_CMD_TOKEN = 'petlink-hook'; // 识别特征：command 字符串含此 token 即我们的
 const STATE_EVENTS = [
-  'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse',
+  'SessionStart', 'SessionEnd', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse',
   'PostToolUseFailure', 'Stop', 'Notification',
 ];
 
@@ -99,7 +99,7 @@ function main() {
   if (mode !== 'uninstall') addOurs(settings);
 
   console.log(`目标文件: ${SETTINGS}${existed ? '' : '（将新建）'}`);
-  console.log(`模式: ${mode}｜摘除旧条目: ${removed}｜${mode === 'uninstall' ? '不重挂' : `重挂: ${STATE_EVENTS.length} 个状态事件 + PermissionRequest(http)`}`);
+  console.log(`模式: ${mode}｜摘除旧条目: ${removed}｜${mode === 'uninstall' ? '不重挂' : `重挂: ${STATE_EVENTS.length} 个状态事件（含 SessionEnd 退出摘除） + PermissionRequest(http)`}`);
 
   if (mode === 'dry-run') {
     console.log('—— 预览（未写盘）——');

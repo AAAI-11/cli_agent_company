@@ -44,7 +44,11 @@ function normalizeHook(body) {
   return { status, text };
 }
 
-const SESSION_TTL_MS = 60 * 1000; // done/error 会话保留 60s（对应 v3.0 F02R 语义）
+const SESSION_TTL_MS = 60 * 1000;        // done/error 会话保留 60s（对应 v3.0 F02R 语义）
+const ACTIVE_STALE_MS = 10 * 60 * 1000; // thinking/working/waiting_confirm 兜底 TTL：
+// 活跃会话每个工具调用都有 hook 刷新 updated，唯一合法长间隔 = 单个长命令执行；
+// waiting_confirm 的真授权窗口只有 35s（hooks 超时回落），超过 10 分钟必是
+// 粗暴关窗/断杀（无 SessionEnd）——留着只会让气泡永远赖在屏上（09-11 真机）
 
 class SessionRegistry {
   constructor() {
@@ -54,6 +58,11 @@ class SessionRegistry {
 
   update(session, agent, status, text) {
     this.sessions.set(session, { agent, status, text: String(text || '').slice(0, 32), updated: Date.now() });
+  }
+
+  /** 显式摘除（SessionEnd）。@returns {boolean} 是否真的摘了 */
+  remove(session) {
+    return this.sessions.delete(session);
   }
 
   /** 当前活跃会话 = 最近一次有状态更新的会话 */
@@ -69,8 +78,11 @@ class SessionRegistry {
   sweep() {
     const now = Date.now();
     for (const [id, s] of this.sessions) {
-      if (now - s.updated > SESSION_TTL_MS && (s.status === 'done' || s.status === 'error')) {
+      const age = now - s.updated;
+      if (age > SESSION_TTL_MS && (s.status === 'done' || s.status === 'error')) {
         this.sessions.delete(id);
+      } else if (age > ACTIVE_STALE_MS) {
+        this.sessions.delete(id); // 非 done 态兜底：源头已死（关窗/断杀），气泡别赖着
       }
     }
   }
