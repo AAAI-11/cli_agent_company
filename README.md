@@ -82,3 +82,5 @@ cd daemon && npm install && npm start    # 起 daemon（macOS 需已装 Node 18+
 - 分支模型与提交规范：[CONTRIBUTING.md](CONTRIBUTING.md)
 - Git/GitHub 入门（写给队友）：[GitHub使用手册.md](GitHub使用手册.md)
 - [功能与排障手册.md](功能与排障手册.md)：已实现功能清单（含验证状态）+ 真机排障步骤（原固件 DEBUG.md 并入）
+- [实操测试指南.md](实操测试指南.md)：真实 Claude Code 会话一条流跑完全部功能的 E2E 操作手册（答辩演示脚本）
+- [Windows调试指南.md](Windows调试指南.md)：Windows 移植清单（能力对照/驱动/烧录/差异表）
