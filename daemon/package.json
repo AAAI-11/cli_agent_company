@@ -5,6 +5,7 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
+    "demo": "PETLINK_VOICE=1 PETLINK_INJECT_PANE=pet:0.0 node src/server.js",
     "smoke": "node test/smoke.js",
     "hooks:preview": "node src/install-hooks.js --dry-run",
     "hooks:install": "node src/install-hooks.js",
