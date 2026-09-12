@@ -3,23 +3,35 @@ menu "PetLink"
     config PETLINK_GPIO_YES
         int "YES 按键 GPIO 编号"
         range 0 54
-        default 21
+        default 50
         help
-            YES 实体键接的 GPIO（杜邦线临时接线阶段按实际脚改）。
+            YES 实体键（放行）：任意按下松开即放行，无时长判档
+            （长按拒绝手势 v0.8 废除）。
             接法：按键一脚接该 GPIO，另一脚接 GND，内部上拉。
-            短按 <600ms 放行，长按 ≥600ms 拒绝。
-            默认 GPIO21 = 40PIN 排针第 27 脚，隔壁 28 脚即 GND。
-            （曾用 GPIO39 已废弃：39 是 TF 卡 SDIO D0，未引出到排针。）
+            默认 GPIO50 = 复刻底板 SW1（2026-09-12 三键改版）。
+            杜邦线临时接线阶段可 menuconfig 改回
+            （曾用 GPIO21 = 排针 27 脚，隔壁 28 脚即 GND）。
 
     config PETLINK_GPIO_NO
         int "NO 按键 GPIO 编号"
         range 0 54
-        default 22
+        default 49
         help
-            NO 实体键接的 GPIO（v0.1.1 增补：按下即拒，不看时长——
-            2026-09-03 真机两次没按准 600ms 长按，演示现场风险太大）。
+            NO 实体键（拒绝）：按下即拒，不看时长——
+            2026-09-03 真机两次没按准 600ms 长按，演示现场风险太大。
             接法同 YES：一脚接该 GPIO，另一脚接 GND（可与 YES 共用 GND）。
-            默认 GPIO22 = 40PIN 排针第 29 脚，与 28 脚 GND 紧邻。
+            默认 GPIO49 = 复刻底板 SW2（曾用 GPIO22 = 排针 29 脚）。
+
+    config PETLINK_GPIO_VOICE
+        int "VOICE 语音键 GPIO 编号（-1=无双键布局外的语音键）"
+        range -1 54
+        default 5
+        help
+            专用语音键：按住录音、松手上传（v0.8 三键改版，PTT）。
+            只在空闲态生效——授权等待时语音让位给按键裁决
+            （门控 main.c voice_armed）。
+            默认 GPIO5 = 复刻底板 SW3。设 -1 退回双键布局
+            （语音输入随之不可用）。
 
     menu "PetLink UI"
 
@@ -104,16 +116,19 @@ menu "PetLink"
             help
                 微雪 P4-WIFI6 板载模拟麦经 ES8311 codec（I²C 0x18）+
                 I2S STD 采集（espressif/esp_codec_dev 官方音频栈），
-                空闲态长按 YES 触发录音，audio 帧经 UART 上行给 daemon
-                转 whisper。关掉则长按 YES 只有拒绝语义。
+                VOICE 键按住说话触发录音，audio 帧经 UART 上行给 daemon
+                转 whisper。关掉则语音键无功能。
 
-        config PETLINK_MIC_RECORD_MS
-            int "单次录音时长（毫秒）"
+        config PETLINK_MIC_MAX_MS
+            int "单次录音时长上限（毫秒）"
             range 2000 30000
-            default 6000
+            default 30000
             help
-                16kHz×16bit = 32KB/s；6s ≈ 192KB（PSRAM 缓冲），
-                921600 波特率下上行约 3s。
+                按住说话（PTT）：松手即上传；按住超过上限自动截断并
+                照常上传（v0.8 起不再定长录音）。
+                16kHz×16bit = 32KB/s；30s ≈ 960KB（PSRAM 缓冲，
+                32MB PSRAM 充裕），921600 波特率下上行约 10s。
+                快于 500ms 的松手视为误触，本地丢弃。
 
         config PETLINK_MIC_GAIN_DB
             int "ES8311 麦克风模拟增益（dB）"

@@ -53,7 +53,7 @@ curl -s localhost:7331/stats | jq
 
 ## 语音输入（F14，v0.2）
 
-设备长按 YES（非授权等待时）说一句话 → 本地 whisper 转写 → 注入 tmux pane（等价于人手键入）。
+设备 VOICE 键**按住说话**（PTT，非授权等待时）→ 松手后整段音频上行 → 本地 whisper 转写 → 注入 tmux pane（等价于人手键入）。
 
 一次性准备（依赖都不入仓库，`models/` 已 gitignore）：
 
@@ -77,7 +77,7 @@ curl -sX POST localhost:7331/permission -H 'Content-Type: application/json' \
 # → curl 返回 {"decision":"allow",...,"by":"device:virtual-1"}
 ```
 
-长按 YES = 拒绝；NO 键按下即拒；不按键 = 超时 deny。
+YES 键（任意按）= 放行（v0.8 起无时长判档，旧固件遗留 `long` 帧同样放行）；NO 键按下即拒；不按键 = 超时空应答（无决策，回落终端弹窗）。
 
 ## 多会话焦点（F02R，v0.5）
 

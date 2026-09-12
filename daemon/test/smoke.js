@@ -100,7 +100,7 @@ async function main() {
     const d1b = await p1b;
     check('permission 由 NO 键拒绝', d1b.hookSpecificOutput?.decision?.behavior === 'deny', JSON.stringify(d1b).slice(0, 90));
 
-    // 4c) YES 长按同样 deny（v0.1 老语义，NO 键出现后仍是合法拒绝路径）
+    // 4c) YES 长按帧兼容（v0.8 三键改版：长按拒绝手势废除，旧固件 long 帧同样放行）
     const p1c = fetch(`${HTTP}/permission`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -109,7 +109,19 @@ async function main() {
     await sleep(400); // 确保已挂起
     ws.send(JSON.stringify({ ver: 1, type: 'button', key: 'yes', event: 'long' }));
     const d1c = await p1c;
-    check('permission 由 Yes 长按拒绝', d1c.hookSpecificOutput?.decision?.behavior === 'deny', JSON.stringify(d1c).slice(0, 90));
+    check('permission 由 Yes 长按放行（旧帧兼容）', d1c.hookSpecificOutput?.decision?.behavior === 'allow', JSON.stringify(d1c).slice(0, 90));
+
+    // 4d) voice 键不上行 button 帧（PTT 在固件本地消化）——若误发也不得
+    //     干扰仲裁：挂起后收到 voice 帧 → waiter 保持挂起，最终超时空应答
+    const p1d = fetch(`${HTTP}/permission`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: 'sess-a', tool: 'Bash', prompt: 'rm -rf /tmp/junk4', timeout_ms: 1500 }),
+    }).then((r) => r.text());
+    await sleep(400); // 确保已挂起
+    ws.send(JSON.stringify({ ver: 1, type: 'button', key: 'voice', event: 'short' }));
+    const d1d = await p1d;
+    check('voice 帧不消费 permission（超时空应答）', d1d === '', `body="${d1d.slice(0, 40)}"`);
 
     // 5) 超时路径：无人按键 → 2xx 空 body（无决策，回落终端弹窗）
     const r5 = await fetch(`${HTTP}/permission`, {
@@ -236,7 +248,7 @@ async function main() {
 
     // 11) 会话统计 GET /stats：本套冒烟跑过的每一类事件都该在计数器里
     const s1 = await fetch(`${HTTP}/stats`).then((r) => r.json());
-    check('/stats 计数 permission 闭环', s1.permission.requests >= 4 && s1.permission.allow >= 1 && s1.permission.deny >= 2,
+    check('/stats 计数 permission 闭环', s1.permission.requests >= 4 && s1.permission.allow >= 2 && s1.permission.deny >= 1,
       JSON.stringify(s1.permission));
     check('/stats 计数按键', (s1.buttons['yes:short'] || 0) >= 1 && (s1.buttons['no:short'] || 0) >= 1 && (s1.buttons['yes:long'] || 0) >= 1,
       JSON.stringify(s1.buttons));

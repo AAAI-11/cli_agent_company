@@ -31,7 +31,7 @@ cd daemon && npm install && npm start    # 起 daemon（macOS 需已装 Node 18+
 |---|---|---|
 | `daemon/` | Node daemon：hooks 归一化 + USB/WS/TCP 链路 + permission 仲裁 + tmux 注入 + whisper 语音输入 + say 语音播报 + 会话统计 + 多会话焦点管理 + token 消耗统计 | `npm run smoke` 28 项 |
 | `virtual_device/` | 浏览器虚拟设备（纯静态，与实体板同协议同状态机、同款会话气泡与 token 行） | daemon smoke 内联覆盖 |
-| `04_firmware/esp32p4_firmware/` | ESP32-P4 固件（ESP-IDF v6.1 + LVGL)：PetLink 协议、六态 UI、PNG 素材槽、ES8311 录音、多会话气泡、token 行 | `sh test/run.sh` 56 项宿主单测 |
+| `04_firmware/esp32p4_firmware/` | ESP32-P4 固件（ESP-IDF v6.1 + LVGL)：PetLink 协议、六态 UI、PNG 素材槽、ES8311 录音、多会话气泡、token 行 | `sh test/run.sh` 58 项宿主单测 |
 | `docs/protocol.md` | PetLink v1 协议规范（帧格式/握手/心跳/判活/防乒乓） | 与固件单测同源 |
 | `04_firmware/oled_board_test/` | 早期 OLED 板验证程序（历史存档） | — |
 
@@ -52,7 +52,9 @@ cd daemon && npm install && npm start    # 起 daemon（macOS 需已装 Node 18+
 ## 硬件事实（与开题设想的主要差异）
 
 - 主控**微雪 ESP32-P4-WIFI6 成品板**（非自绘 ESP32-S3 板）：USB-C 经 CH343 桥接 P4 UART0；
-  PSRAM 32MB；YES=GPIO21、NO=GPIO22 对 GND 按键；板载 ES8311 codec 模拟麦（语音输入）
+  PSRAM 32MB；板载 ES8311 codec 模拟麦（语音输入）
+- 按键**复刻底板三机械轴**（原作开源硬件方案三底板，非自绘 PCB，v0.8 起适配）：
+  YES=GPIO50(SW1)、NO=GPIO49(SW2)、VOICE=GPIO5(SW3)；杜邦线阶段曾用 GPIO21/22
 - 屏**淘宝 WLK2802MIPI-15P**（2.8″ 480×640 IPS ST7701S，MIPI-DSI 1 lane）非 SPI ST7789
 - 通信 **USB 串口直连**（PetLink v1 NDJSON@921600，v0.4 为语音流升档），无 Wi-Fi/MQTT/云端环节——
   单根 USB 线既是电源又是信道，演示零网络依赖
@@ -75,6 +77,9 @@ cd daemon && npm install && npm start    # 起 daemon（macOS 需已装 Node 18+
 - [x] v0.7 状态提示音（2026-09-09，F16，宪法 v3.3）：waiting_confirm/done/error
       转移时板上播放合成提示音（ES8311 DAC + NS4150 功放，外接 8Ω 无源喇叭）；
       与 daemon 侧 TTS（F12）同触发集分层互补；录音优先，mic 忙时提示音丢弃
+- [x] v0.8 三键改版（2026-09-12，宪法 v3.4）：废除长按拒绝——YES 任意松开放行；
+      语音改专用 VOICE 键按住说话（PTT，松手上传、上限 30s）；引脚适配复刻底板
+      SW1/SW2/SW3 = GPIO50/49/5（原作开源硬件方案三，与原版"长按唤醒语音"习惯对齐）
 - [ ] 冲刺：演示材料、答辩准备、**提交前仓库公开**（创新叙事 = 真开源补完）
 
 ## 协作与工具

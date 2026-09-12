@@ -107,20 +107,17 @@ function setConn(on, msg) {
 /* 心跳：保活 daemon 侧 lastSeen */
 setInterval(() => send({ ver: 1, type: 'heartbeat', uptime_ms: performance.now() | 0 }), 5000);
 
-/* ---------- YES 键：短按=allow 长按=deny ---------- */
+/* ---------- YES 键：任意按=allow（v0.8 三键改版：长按拒绝废除） ---------- */
 
 (() => {
   const btn = document.getElementById('yes');
-  let t0 = 0;
-  btn.addEventListener('pointerdown', () => { t0 = performance.now(); });
   btn.addEventListener('pointerup', () => {
-    const event = performance.now() - t0 >= 600 ? 'long' : 'short';
-    send({ ver: 1, type: 'button', key: 'yes', event });
-    flashYes(event);
+    send({ ver: 1, type: 'button', key: 'yes', event: 'short' });
+    flashYes();
   });
-  let flashT = 0, flashKind = '';
-  function flashYes(kind) { flashT = performance.now(); flashKind = kind; }
-  window.__yesFlash = () => ({ flashT, flashKind });
+  let flashT = 0;
+  function flashYes() { flashT = performance.now(); }
+  window.__yesFlash = () => ({ flashT });
 })();
 
 /* ---------- NO 键：按下即发（有授权挂起=拒，空闲=切换焦点会话） ---------- */
@@ -220,8 +217,8 @@ function draw(t) {
     ctx.globalAlpha = 1 - dt / 500;
     ctx.textAlign = 'center';
     ctx.font = '700 13px ui-monospace, monospace';
-    ctx.fillStyle = f.flashKind === 'short' ? '#9ece6a' : '#f7768e';
-    ctx.fillText(f.flashKind === 'short' ? 'YES → ALLOW' : 'YES(hold) → DENY', cx, H - 40);
+    ctx.fillStyle = '#9ece6a';
+    ctx.fillText('YES → ALLOW', cx, H - 40);
     ctx.globalAlpha = 1;
   }
   const ndt = window.__noFlash ? performance.now() - window.__noFlash : 1e9;

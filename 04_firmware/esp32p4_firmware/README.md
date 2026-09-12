@@ -33,7 +33,7 @@ esp32p4_firmware/
 │   ├── font_pet_32.c       # 中文字体子集（~500 字，重生成命令见文件头注释）
 │   └── Kconfig.projbuild   # YES/NO GPIO、STAGE 旋钮、LDO/RST、麦引脚/录音时长可配
 ├── tools/                  # 素材工具：gen_test_pngs.py（纯 stdlib 造五态图）+ mkassets.sh（打包烧录）
-└── test/                   # 宿主机单元测试 56 项（不装 ESP-IDF 也能跑）
+└── test/                   # 宿主机单元测试 58 项（不装 ESP-IDF 也能跑）
 ```
 
 ## 一次性环境安装（macOS）
@@ -98,11 +98,12 @@ curl -X POST http://127.0.0.1:7331/usb/resume
 daemon 没在跑就跳过 pause/resume 两步（或者干脆停掉再烧也行）。
 退出 monitor：`Ctrl+]`。任何第三方烧录工具（官方恢复包、esptool 直用）同理。
 
-## 接线（杜邦线阶段）
+## 按键（v0.8 三键布局，2026-09-12 改版）
 
-- **YES 键**：一脚接 GPIO21（默认，= 排针第 27 脚；`idf.py menuconfig → PetLink` 可改），一脚接 GND（第 28 脚在隔壁）。GPIO39 已废弃——那是 TF 卡 SDIO D0，不在排针上
-- **NO 键**（v0.1.1）：一脚接 GPIO22（= 排针第 29 脚，就在 GND(28) 下面），一脚接 GND（与 YES 共用第 28 脚即可）
-- 按键语义与虚拟设备一致：**YES 短按 <600ms = 放行，YES 长按 ≥600ms = 拒绝，NO 键按下即拒**
+- 复刻底板（原作开源硬件方案三）三机械轴：**YES=GPIO50(SW1)、NO=GPIO49(SW2)、VOICE=GPIO5(SW3)**，Kconfig 可改；与板载音频脚（7~13、53）零冲突
+- 杜邦线临时接线阶段：按键一脚接对应 GPIO，另一脚接 GND，内部上拉；menuconfig 里可改回旧脚（曾用 YES=GPIO21=排针 27 脚、NO=GPIO22=排针 29 脚，GND=28 脚）
+- 按键语义：**YES 任意按下松开 = 放行**（v0.8 起废除长按拒绝的 600ms 时长判档），**NO 按下即拒**，**VOICE 按住说话**（PTT）
+- `PETLINK_GPIO_VOICE=-1` 可退回双键布局（语音输入随之不可用）
 - 屏幕：WLK2802MIPI-15P（2.8″ 480×640 IPS，ST7701S）插板上 MIPI DSI 座——
   FFC 注意方向（触点朝向按板上丝印），插反不亮但不损坏
 
@@ -170,14 +171,15 @@ sh tools/mkassets.sh
 `mkassets.sh` 自动完成：daemon 暂停 USB → fatfsgen 打包 → parttool 烧 `asset` 分区 →
 恢复扫描。烧完按 RESET，开机日志应出现 `asset 挂载完成：PNG 6/6 张就位，预解码 5 张入缓存`。
 
-## 语音输入（v0.4，F14）
+## 语音输入（v0.4 起语音输入 → v0.8 按住说话，F14）
 
-**触发**：空闲态（非 `waiting_confirm`）**长按 YES ≥600ms 松开** → 板载麦录音
-6s（屏幕显示"录音中"）→ `audio` 分块帧上行 → daemon whisper 转写 → 注入 tmux。
-授权等待期间长按仍是**拒绝手势**，不会触发录音。
+**触发**：空闲态（非 `waiting_confirm`）**按住 VOICE 键说话，说完松手** → 松手整段
+`audio` 分块帧上行 → daemon whisper 转写 → 注入 tmux（屏幕按住期间显示"录音中"）。
+按住超过 30s 自动截断并照常上传；快于 500ms 的松手视为误触，本地丢弃。
+授权等待期间语音让位按键裁决，不触发录音。
 
-- 录音参数：16kHz / 16bit / 单声道（whisper 舒适区），6s ≈ 192KB PSRAM 缓冲，
-  921600 波特率下上行约 3s
+- 录音参数：16kHz / 16bit / 单声道（whisper 舒适区），30s ≈ 960KB PSRAM 缓冲，
+  921600 波特率下上行约 10s
 - 硬件（微雪 wiki「I2S Audio Demo」2026-09-08 核实）：板载**模拟麦走 ES8311
   codec**，I²C 0x18 @ SCL=GPIO8/SDA=GPIO7；P4 做 I2S master：MCLK=13/SCLK=12/
   LRCK=10/ASDOUT=11。引脚为板载固定布线，硬编码在 `mic.c`
@@ -192,17 +194,17 @@ sh tools/mkassets.sh
 2. 插板子、烧录——daemon 日志应出现：
    ```
    UsbCdcLink 连接 /dev/cu.usbmodemXXX（Espressif）@921600
-   [cdc#N] 握手完成 → p4-xxxxxx (fw=0.6.0 hw=p4-board caps=button,mic)
+   [cdc#N] 握手完成 → p4-xxxxxx (fw=0.8.0 hw=p4-board caps=button,mic)
    ```
 3. 浏览器开 http://localhost:7331/device —— 虚拟设备与实体板**同步**显示同一状态
    （daemon 向所有已握手设备广播，一实一虚同源）
 4. 让任意终端里的 Claude Code 干活，按板上 YES → daemon 日志 `已消费（permission 仲裁）`
-5. 空闲态长按 YES 说句话 → daemon 日志 `[voice-in] ... 语音已注入 pane=...`
+5. 空闲态按住 VOICE 键说句话、松手 → daemon 日志 `[voice-in] ... 语音已注入 pane=...`
 
 ## 宿主机单元测试（不需要 ESP-IDF）
 
 ```bash
-sh test/run.sh    # 56 项：编码/分帧/握手/防乒乓/五态/容错/判活/文本截断/audio 帧 b64 与分块/bubbles+tokens 解析 + ui_map 六态映射
+sh test/run.sh    # 58 项：编码/分帧/握手/防乒乓/五态/容错/判活/文本截断/audio 帧 b64 与分块/bubbles+tokens 解析 + ui_map 六态映射
 ```
 
 ## 已知事项
@@ -234,3 +236,7 @@ sh test/run.sh    # 56 项：编码/分帧/握手/防乒乓/五态/容错/判活
 - [x] v0.6.0 token 行（F15，2026-09-09）：state 帧可选 `tokens` 字段 →
       标题下方常驻 `ctx 45.1k / tot 1.2M` 小字（焦点会话口径，daemon 增量解析
       transcript usage；帧未带/非法则隐藏——旧 daemon 行为不变）
+- [x] v0.7.x 状态提示音（F16，2026-09-09）：ES8311 DAC + NS4150 板端三态提示音
+- [x] v0.8.0 三键改版（2026-09-12，需求 v3.4 §4.7）：废除长按拒绝，YES 任意松开
+      放行；语音改专用 VOICE 键按住说话（PTT，松手上传，上限 30s）；引脚适配
+      复刻底板 SW1/SW2/SW3 = GPIO50/49/5

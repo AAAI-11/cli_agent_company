@@ -1,14 +1,16 @@
 /**
- * petlink-fw v0.4 —— ESP32-P4 固件入口（屏幕 + 语音输入版）。
+ * petlink-fw v0.8 —— ESP32-P4 固件入口（三键 + 按住说话版）。
  *
  * 链路：UART0 @921600（板上 USB-C 经 CH343 桥接到 UART0——微雪 P4-WIFI6 的
  *       实际布线，P4 原生 USJ 未引出；daemon 的 UsbCdcLink 按 WCH VID 1a86 识别。
  *       921600 = 语音上行带宽：16kHz×16bit = 32KB/s，115200 只有 ~11.5KB/s）
- * 按键：YES / NO 两键（GPIO menuconfig 可改），一脚接 GPIO 一脚接 GND，内部上拉；
- *       YES 短按 <600ms = 放行、长按 ≥600ms = 拒绝；NO 键按下即拒（v0.1.1 增补，
- *       规避演示现场长按 600ms 的手感风险——2026-09-03 真机两次没按准的教训）
- * 语音：v0.4 空闲态长按 YES = 板载 PDM 麦录音 → audio 帧上行（mic.c，协议 §3.7）；
- *       授权等待（waiting_confirm）时长按仍是拒绝手势，不触发录音
+ * 按键：YES / NO / VOICE 三键（GPIO menuconfig 可改），一脚接 GPIO 一脚接 GND，内部上拉；
+ *       YES 任意按下松开 = 放行（不再有时长判档——长按拒绝手势 v0.8 废除）；
+ *       NO 键按下即拒（不看时长，2026-09-03 真机两次没按准 600ms 的教训）；
+ *       VOICE 键按住说话（PTT）：按下开始录音、松手上传（与原版哈基米机
+ *       「长按唤醒语音」的用户习惯对齐）
+ * 语音：空闲态 VOICE 键按住 = 板载麦录音 → 松手 audio 帧上行（mic.c，协议 §3.7）；
+ *       授权等待（waiting_confirm）时语音让位给按键裁决，不触发录音
  * UI  ：MIPI-DSI 480×640 + LVGL 六态宠物（v0.2 起接管 ui_on_state——快照推送，
  *       渲染全在 LVGL 任务，petlink 协议核心零改动）
  *
@@ -113,32 +115,35 @@ static void ui_on_hello_ok(const char *daemon_ver, void *ctx)
   pet_ui_push(&snap);
 }
 
-/* ---------------- 实体按键：消抖 + 短/长按（YES/NO 共用一套判型） ---------------- */
+/* ---------------- 实体按键：消抖 + 按下/松开沿分发 ---------------- */
 
 #define DEBOUNCE_MS 20
-#define LONGPRESS_MS 600
 
 typedef struct {
   gpio_num_t gpio;
-  const char *key;   /* PetLink button 帧的 key 名 */
   const char *label; /* 日志标签 */
   int stable;        /* 稳定电平：1=松开（上拉），0=按下 */
   int last_raw;      /* 最近原始电平 */
   uint32_t t_raw;    /* 原始电平跳变时刻（消抖观察窗起点） */
-  uint32_t t_press;  /* 按下起点 */
+  uint32_t t_press;  /* 按下起点（日志用） */
+  void (*on_down)(void); /* 按下沿动作（可空） */
+  void (*on_up)(void);   /* 松开沿动作（可空） */
 } btn_t;
 
 static bool g_mic_ok; /* 语音输入可用（编译开 + mic_init 成功） */
 
-static btn_t g_yes = { .key = "yes", .label = "YES", .stable = 1, .last_raw = 1 };
-static btn_t g_no  = { .key = "no",  .label = "NO",  .stable = 1, .last_raw = 1 };
-
-static void btn_init(btn_t *b, gpio_num_t gpio)
+/* YES：任意松开 = 放行（v0.8 起无时长判档——长按拒绝手势废除） */
+static void yes_up(void)
 {
-  b->gpio = gpio;
-  gpio_reset_pin(gpio);
-  gpio_set_direction(gpio, GPIO_MODE_INPUT);
-  gpio_set_pull_mode(gpio, GPIO_PULLUP_ONLY);
+  pl_button(&g_pl, "yes", "short");
+  ESP_LOGI(TAG, "YES→allow");
+}
+
+/* NO：松开上报，裁决在 daemon（deny；空闲态另有切焦点职责，都在 daemon 侧） */
+static void no_up(void)
+{
+  pl_button(&g_pl, "no", "short");
+  ESP_LOGI(TAG, "NO→deny");
 }
 
 /* 语音输入武装条件：编译开 + 初始化过 + 已握手 + 不在授权等待 + 不忙 */
@@ -146,6 +151,39 @@ static bool voice_armed(void)
 {
   return g_mic_ok && g_pl.helloed &&
          g_last_status != PL_ST_WAITING_CONFIRM && !mic_busy();
+}
+
+static void voice_down(void)
+{
+  if (!voice_armed()) {
+    ESP_LOGI(TAG, "VOICE 按下但未武装（未连接/授权等待/录音中）——忽略");
+    return;
+  }
+  ESP_LOGI(TAG, "VOICE 按下 → 开始录音");
+  mic_start();
+}
+
+static void voice_up(void)
+{
+  if (mic_busy()) { /* 录音中松手 = 结束并上传；到达上限自动停后这里是空操作 */
+    ESP_LOGI(TAG, "VOICE 松开 → 结束录音并上传");
+    mic_stop();
+  }
+}
+
+static btn_t g_yes   = { .label = "YES",   .stable = 1, .last_raw = 1,
+                         .gpio = (gpio_num_t)-1, .on_up = yes_up };
+static btn_t g_no    = { .label = "NO",    .stable = 1, .last_raw = 1,
+                         .gpio = (gpio_num_t)-1, .on_up = no_up };
+static btn_t g_voice = { .label = "VOICE", .stable = 1, .last_raw = 1,
+                         .gpio = (gpio_num_t)-1, .on_down = voice_down, .on_up = voice_up };
+
+static void btn_init(btn_t *b, gpio_num_t gpio)
+{
+  b->gpio = gpio;
+  gpio_reset_pin(gpio);
+  gpio_set_direction(gpio, GPIO_MODE_INPUT);
+  gpio_set_pull_mode(gpio, GPIO_PULLUP_ONLY);
 }
 
 static void btn_poll(btn_t *b, uint32_t now)
@@ -160,20 +198,11 @@ static void btn_poll(btn_t *b, uint32_t now)
   if (raw == b->stable) return;      /* 结论与现状一致，无事 */
 
   b->stable = raw;
-  if (raw == 0) {
-    b->t_press = now;                /* 按下沿 */
-  } else {
-    uint32_t dur = now - b->t_press; /* 松开沿：定档上报 */
-    int is_long = dur >= LONGPRESS_MS;
-    pl_button(&g_pl, b->key, is_long ? "long" : "short");
-    /* 裁决在 daemon；日志按约定口径打：yes 长按 / no 任意 = deny */
-    const char *sem = (b->key[0] == 'n' || is_long) ? "deny" : "allow";
-    ESP_LOGI(TAG, "%s %s→%s（%lums）", b->label, is_long ? "长按" : "短按", sem, (unsigned long)dur);
-    /* 空闲态长按 YES = 语音输入（授权等待时的长按是拒绝手势，voice_armed 拦下） */
-    if (is_long && b->key[0] == 'y' && voice_armed()) {
-      ESP_LOGI(TAG, "长按 YES → 语音录音触发");
-      mic_request();
-    }
+  if (raw == 0) {                    /* 按下沿 */
+    b->t_press = now;
+    if (b->on_down) b->on_down();
+  } else {                           /* 松开沿 */
+    if (b->on_up) b->on_up();
   }
 }
 
@@ -195,7 +224,7 @@ static void petlink_task(void *arg)
   snprintf(dev_id, sizeof(dev_id), "p4-%02x%02x%02x", mac[3], mac[4], mac[5]);
 
   pl_cbs_t cbs = { io_send, ui_on_state, ui_on_hello_ok, io_uptime };
-  pl_init(&g_pl, &cbs, NULL, dev_id, "0.7.1");
+  pl_init(&g_pl, &cbs, NULL, dev_id, "0.8.0");
 
   vTaskDelay(pdMS_TO_TICKS(100)); /* 桥接芯片无枚举等待，留个稳定裕量 */
   pl_start(&g_pl, io_uptime(NULL));
@@ -211,6 +240,7 @@ static void petlink_task(void *arg)
     if (n > 0) pl_feed(&g_pl, (const char *)rxbuf, (size_t)n, now);
     btn_poll(&g_yes, now);
     btn_poll(&g_no, now);
+    if (g_voice.gpio >= 0) btn_poll(&g_voice, now);
     pl_poll(&g_pl, now);
     /* 掉线沿：helloed 翻 false 时把 UI 推回 CONNECTING（petlink.c 零改动） */
     bool live = g_pl.helloed;
@@ -247,6 +277,8 @@ void app_main(void)
   /* 正式模式：屏 + 协议（默认） */
   btn_init(&g_yes, (gpio_num_t)CONFIG_PETLINK_GPIO_YES);
   btn_init(&g_no, (gpio_num_t)CONFIG_PETLINK_GPIO_NO);
+  if (CONFIG_PETLINK_GPIO_VOICE >= 0) /* -1 = 无语音键的双键布局 */
+    btn_init(&g_voice, (gpio_num_t)CONFIG_PETLINK_GPIO_VOICE);
   esp_lcd_panel_handle_t panel = disp_dsi_init();
   pet_ui_mount(panel);
   xTaskCreate(petlink_task, "petlink", 6144, NULL, 5, NULL); /* 6KB：petlink 协议 + 语音触发接线 */

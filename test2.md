@@ -80,11 +80,11 @@ curl -sX POST localhost:7331/state -H 'Content-Type: application/json' -d '{"eve
 
 ### f. [ ] 录音优先验证
 
-长按 YES 录音（F14 链路）**期间**触发一条 e 步 curl。✅ 判定：录音正常完成、提示音不响（mic 忙整段丢弃，grill 定稿）；录音结束后下一个转移恢复出声。
+按住 VOICE 键录音（F14 链路）**期间**触发一条 e 步 curl。✅ 判定：录音正常完成、提示音不响（mic 忙整段丢弃，grill 定稿）；录音结束后下一个转移恢复出声。
 
 ### g. [ ] 回归：语音输入未被改坏
 
-mic.c 被重构过（硬件装配移到 audio_hw.c），必测：空闲态长按 YES 6s → daemon 日志照旧出现 whisper 转写（哪怕乱码幻觉也算链路通）。
+mic.c 被重构过（硬件装配移到 audio_hw.c），必测：空闲态按住 VOICE 键说一句再松手（v0.8 PTT） → daemon 日志照旧出现 whisper 转写（哪怕乱码幻觉也算链路通）。
 
 ## 三、收尾
 

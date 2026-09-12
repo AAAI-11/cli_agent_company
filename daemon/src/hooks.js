@@ -56,7 +56,7 @@ class PermissionManager {
     });
   }
 
-  /** 设备按键路由：yes短按=allow，yes长按/no键=deny，其余忽略。@return 是否消费了按键 */
+  /** 设备按键路由：yes=allow，no=deny，其余（含旧版 yes 长按帧）忽略。@return 是否消费了按键 */
   resolveButton(key, event, dev) {
     const w = this.waiters[0];
     if (!w) return false;
@@ -66,17 +66,14 @@ class PermissionManager {
       w.resolve('deny', '用户按下实体 NO 键', `device:${dev}`);
       return true;
     }
-    if (key === 'yes' && event === 'short') {
+    if (key === 'yes') {
+      // v0.8 三键改版：任意按 YES 即放行（旧固件可能仍发 long 帧，同样放行——
+      // 长按拒绝手势已废除，语义不再是"按时长定档"）
       this.waiters.shift();
       w.resolve('allow', '用户按下实体 Yes 键', `device:${dev}`);
       return true;
     }
-    if (key === 'yes' && event === 'long') {
-      this.waiters.shift();
-      w.resolve('deny', '用户长按 Yes 键拒绝', `device:${dev}`);
-      return true;
-    }
-    return false; // btn2/btn3 留给未来自定义动作
+    return false; // voice 键不上行 button 帧（PTT 在固件本地消化）；其余留给未来自定义动作
   }
 }
 
