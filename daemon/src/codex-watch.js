@@ -2,8 +2,9 @@
 
 var fs = require("fs");
 var path = require("path");
+var os = require("os");
 
-var HOME = process.env.USERPROFILE || "C:/Users/Lenovo";
+var HOME = os.homedir();
 var ROOT = path.join(HOME, ".codex", "sessions");
 
 var MAP = {
@@ -35,10 +36,12 @@ class CodexWatch {
     this._tracked = {};
     this._errs = 0;
     this._idleTicks = 0;
+    this._registered = false;
   }
 
   start() {
-    this.reg.update(this.sid, "codex-cli", "done", "watching");
+    // Don't register immediately — wait until we discover at least one real session
+    // file to avoid a stray "codex-cli" bubble when no sessions exist yet.
     this._timer = setInterval(this._scan.bind(this), this.ms);
     if (this._timer.unref) this._timer.unref();
   }
@@ -56,6 +59,14 @@ class CodexWatch {
       // New sessions get discovered here; existing ones get polled for growth.
       var seen = {};
       try { this._walk(ROOT, seen); } catch (e) {}
+      var hasSessions = Object.keys(seen).length > 0;
+
+      // Defer first registration until we see at least one real session file.
+      if (hasSessions && !this._registered) {
+        this._registered = true;
+        this.reg.update(this.sid, "codex-cli", "done", "watching");
+        this.log("[codex-watch] registered session after discovering " + Object.keys(seen).length + " file(s) in " + ROOT);
+      }
 
       var fp;
       for (fp in seen) {
