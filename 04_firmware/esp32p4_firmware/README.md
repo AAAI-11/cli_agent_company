@@ -115,9 +115,9 @@ daemon 没在跑就跳过 pause/resume 两步（或者干脆停掉再烧也行�
 左右推动 → `prev`/`next` button 帧上行 → daemon 双向切焦点会话 +
 **Mac 端 tmux 视图同步**（`select-window`/`select-pane` 跟到焦点会话的 pane）。
 
-- **引脚配置**：Kconfig `PETLINK_GPIO_JOY_X`，**默认 -1 = 禁用**（引脚号待原理图
-  读数补；读出后 `idf.py menuconfig → PetLink` 填入重编即可，代码零改动）。
-  GPIO 必须是 ADC 脚，运行时探测失败只禁用摇杆，不拖垮按键授权主链路
+- **引脚配置**：Kconfig `PETLINK_GPIO_JOY_X`，**默认 21**（实板读数：X=GPIO21 /
+  Y=GPIO20，均 ADC1 空闲脚；Y 本期不接，记档 §4.8）。改 -1 可禁用；GPIO 须为
+  ADC 脚，运行时探测失败只禁用摇杆，不拖垮按键授权主链路
 - **信号链**：ADC oneshot 12bit + curve fitting 校准到毫伏 → 上电中心校准
   （32 次均值——自回中电位器有漂移，不信理论中点）→ 归一化偏移 ±1000 →
   死区/迟滞（进入 30% 触发、退回 18% 复位，防临界抖动）→ 沿触发一次 +
