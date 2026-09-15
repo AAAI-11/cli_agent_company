@@ -1,10 +1,11 @@
 # petlink-fw —— ESP32-P4 固件
 
-PetLink v1 设备端。**v0.6.0 token 可视版**：串口链路（**921600**）+ YES/NO 实体键 +
+PetLink v1 设备端。**v0.9.0 摇杆导航版**：串口链路（**921600**）+ YES/NO/VOICE 三键 +
 MIPI-DSI 六态宠物 UI + 文本上屏 + 五态 PNG 素材槽 + 板载 ES8311 麦克风录音上行 +
 **多会话气泡行**（state 帧可选 `bubbles` 字段：各会话状态色圆点、焦点加大加白环；
 空闲态 NO 键循环切换焦点——F02R，协议 §3.4）+
-**token 行**（state 帧可选 `tokens` 字段：焦点会话 ctx/tot 顶栏标题下方常驻小字——F15，协议 §3.4）。
+**token 行**（state 帧可选 `tokens` 字段：焦点会话 ctx/tot 顶栏标题下方常驻小字——F15，协议 §3.4）+
+**摇杆导航**（X 轴 ADC → prev/next 事件，daemon 双向切焦点 + tmux 视图同步——F17，宪法 v3.5 §4.8）。
 v0.3 里程碑（2026-09-05 真机闭环）：状态切换→上屏实测首显 max 75ms / 缓存命中
 max 87ms，宪法预算 500ms。
 驱动基底 = 乐鑫官方示例 + espressif 组件（Apache-2.0，宪法 L109）；屏幕参数走卖家
@@ -25,7 +26,8 @@ esp32p4_firmware/
 ├── main/
 │   ├── petlink.h/.c        # 协议核心：纯 C、无 IDF 依赖（宿主单测；v0.4 增 audio 帧 + b64）
 │   ├── mic.h/.c            # ES8311 codec 录音任务：esp_codec_dev → PSRAM 缓冲 → audio 帧上行（v0.4）
-│   ├── main.c              # IDF 接线：UART0 收发（TX 互斥锁）+ 按键 + 语音触发 + STAGE 分派
+│   ├── joystick.h/.c       # 摇杆导航（F17，v0.9）：ADC + 死区/迟滞/自动重复状态机（纯逻辑宿主可测）
+│   ├── main.c              # IDF 接线：UART0 收发（TX 互斥锁）+ 按键 + 语音触发 + 摇杆 + STAGE 分派
 │   ├── disp_dsi.h/.c       # MIPI-DSI 点屏：WLK2802MIPI-15P 卖家参数（见文件头注释）
 │   ├── pet_ui.h/.c         # LVGL 六态宠物：矢量小狗 + 动画 + 多会话气泡行 + token 行（与 pet.js 同源）
 │   ├── pet_assets.h/.c     # 五态 PNG 素材槽：FAT 挂载 + 预解码 + 矢量兜底（v0.3）
@@ -33,7 +35,7 @@ esp32p4_firmware/
 │   ├── font_pet_32.c       # 中文字体子集（~500 字，重生成命令见文件头注释）
 │   └── Kconfig.projbuild   # YES/NO GPIO、STAGE 旋钮、LDO/RST、麦引脚/录音时长可配
 ├── tools/                  # 素材工具：gen_test_pngs.py（纯 stdlib 造五态图）+ mkassets.sh（打包烧录）
-└── test/                   # 宿主机单元测试 58 项（不装 ESP-IDF 也能跑）
+└── test/                   # 宿主机单元测试 82 项（不装 ESP-IDF 也能跑）
 ```
 
 ## 一次性环境安装（macOS）
@@ -104,6 +106,26 @@ daemon 没在跑就跳过 pause/resume 两步（或者干脆停掉再烧也行�
 - 杜邦线临时接线阶段：按键一脚接对应 GPIO，另一脚接 GND，内部上拉；menuconfig 里可改回旧脚（曾用 YES=GPIO21=排针 27 脚、NO=GPIO22=排针 29 脚，GND=28 脚）
 - 按键语义：**YES 任意按下松开 = 放行**（v0.8 起废除长按拒绝的 600ms 时长判档），**NO 按下即拒**，**VOICE 按住说话**（PTT）
 - `PETLINK_GPIO_VOICE=-1` 可退回双键布局（语音输入随之不可用）
+- 屏幕：WLK2802MIPI-15P（2.8″ 480×640 IPS，ST7701S）插板上 MIPI DSI 座——
+  FFC 注意方向（触点朝向按板上丝印），插反不亮但不损坏
+
+## 摇杆导航（v0.9，F17，宪法 v3.5 §4.8）
+
+复刻底板 5kΩ **自回中模拟摇杆**，X 轴接 ADC 脚（Y 轴与 SW 按下轴本期不接）。
+左右推动 → `prev`/`next` button 帧上行 → daemon 双向切焦点会话 +
+**Mac 端 tmux 视图同步**（`select-window`/`select-pane` 跟到焦点会话的 pane）。
+
+- **引脚配置**：Kconfig `PETLINK_GPIO_JOY_X`，**默认 -1 = 禁用**（引脚号待原理图
+  读数补；读出后 `idf.py menuconfig → PetLink` 填入重编即可，代码零改动）。
+  GPIO 必须是 ADC 脚，运行时探测失败只禁用摇杆，不拖垮按键授权主链路
+- **信号链**：ADC oneshot 12bit + curve fitting 校准到毫伏 → 上电中心校准
+  （32 次均值——自回中电位器有漂移，不信理论中点）→ 归一化偏移 ±1000 →
+  死区/迟滞（进入 30% 触发、退回 18% 复位，防临界抖动）→ 沿触发一次 +
+  按住每 400ms 自动重复（甩杆换向支持一步直翻）
+- **门控**：与语音输入同哲学——授权等待（waiting_confirm）让位按键裁决、
+  录音时不翻页、未握手不生效（daemon 侧再挡一层防旧固件）
+- **架构**：状态机（`joy_axis_*`）纯逻辑与硬件读数分离，宿主机 24 项单测覆盖
+  （死区/迟滞/自动重复/换向/漂移中心/初始化安全性）
 - 屏幕：WLK2802MIPI-15P（2.8″ 480×640 IPS，ST7701S）插板上 MIPI DSI 座——
   FFC 注意方向（触点朝向按板上丝印），插反不亮但不损坏
 
@@ -194,7 +216,7 @@ sh tools/mkassets.sh
 2. 插板子、烧录——daemon 日志应出现：
    ```
    UsbCdcLink 连接 /dev/cu.usbmodemXXX（Espressif）@921600
-   [cdc#N] 握手完成 → p4-xxxxxx (fw=0.8.0 hw=p4-board caps=button,mic)
+   [cdc#N] 握手完成 → p4-xxxxxx (fw=0.9.0 hw=p4-board caps=button,mic)
    ```
 3. 浏览器开 http://localhost:7331/device —— 虚拟设备与实体板**同步**显示同一状态
    （daemon 向所有已握手设备广播，一实一虚同源）
@@ -204,7 +226,7 @@ sh tools/mkassets.sh
 ## 宿主机单元测试（不需要 ESP-IDF）
 
 ```bash
-sh test/run.sh    # 58 项：编码/分帧/握手/防乒乓/五态/容错/判活/文本截断/audio 帧 b64 与分块/bubbles+tokens 解析 + ui_map 六态映射
+sh test/run.sh    # 82 项：编码/分帧/握手/防乒乓/五态/容错/判活/文本截断/audio 帧 b64 与分块/bubbles+tokens 解析 + ui_map 六态映射 + 摇杆状态机（死区/迟滞/自动重复/换向）
 ```
 
 ## 已知事项
@@ -240,3 +262,6 @@ sh test/run.sh    # 58 项：编码/分帧/握手/防乒乓/五态/容错/判活
 - [x] v0.8.0 三键改版（2026-09-12，需求 v3.4 §4.7）：废除长按拒绝，YES 任意松开
       放行；语音改专用 VOICE 键按住说话（PTT，松手上传，上限 30s）；引脚适配
       复刻底板 SW1/SW2/SW3 = GPIO50/49/5
+- [x] v0.9.0 摇杆导航（2026-09-14，F17，需求 v3.5 §4.8）：X 轴 ADC → prev/next
+      事件；daemon 双向切焦点 + tmux 视图同步；引脚号待原理图读数
+      （Kconfig 默认 -1 禁用）

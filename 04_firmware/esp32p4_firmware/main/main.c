@@ -1,5 +1,5 @@
 /**
- * petlink-fw v0.8 —— ESP32-P4 固件入口（三键 + 按住说话版）。
+ * petlink-fw v0.9 —— ESP32-P4 固件入口（三键 + 按住说话 + 摇杆导航版）。
  *
  * 链路：UART0 @921600（板上 USB-C 经 CH343 桥接到 UART0——微雪 P4-WIFI6 的
  *       实际布线，P4 原生 USJ 未引出；daemon 的 UsbCdcLink 按 WCH VID 1a86 识别。
@@ -9,13 +9,16 @@
  *       NO 键按下即拒（不看时长，2026-09-03 真机两次没按准 600ms 的教训）；
  *       VOICE 键按住说话（PTT）：按下开始录音、松手上传（与原版哈基米机
  *       「长按唤醒语音」的用户习惯对齐）
+ * 摇杆：X 轴 ADC（F17，v3.5 §4.8）——左右推动 → button 帧 prev/next，
+ *       daemon 侧双向切焦点会话 + tmux 视图同步。GPIO -1 = 禁用（默认，
+ *       引脚号待原理图读数补）。与语音同门控哲学：授权等待时让位
  * 语音：空闲态 VOICE 键按住 = 板载麦录音 → 松手 audio 帧上行（mic.c，协议 §3.7）；
  *       授权等待（waiting_confirm）时语音让位给按键裁决，不触发录音
  * UI  ：MIPI-DSI 480×640 + LVGL 六态宠物（v0.2 起接管 ui_on_state——快照推送，
  *       渲染全在 LVGL 任务，petlink 协议核心零改动）
  *
- * 任务模型：协议任务 20ms 一拍（读 CDC → 喂协议核心 → 消抖按键 → 心跳/判活）
- * + mic 录音任务（事件触发）。UART TX 互斥锁保证两任务并发发帧不劈行。
+ * 任务模型：协议任务 20ms 一拍（读 CDC → 喂协议核心 → 消抖按键 → 摇杆采样
+ * → 心跳/判活）+ mic 录音任务（事件触发）。UART TX 互斥锁保证两任务并发发帧不劈行。
  */
 #include <stdio.h>
 #include <string.h>
@@ -35,6 +38,7 @@
 #include "pet_ui.h"
 #include "mic.h"
 #include "spk.h"
+#include "joystick.h"
 
 static const char *TAG = "petlink";
 
@@ -171,6 +175,26 @@ static void voice_up(void)
   }
 }
 
+/* ---------------- 摇杆导航（F17，v3.5 §4.8） ---------------- */
+
+static joy_axis_t g_joy; /* X 轴状态机（死区/迟滞/自动重复，纯逻辑可单测） */
+static bool g_joy_ok;   /* 摇杆可用（配脚 + joystick_init 成功含中心校准） */
+
+/* 摇杆门控：与语音输入同哲学——授权等待让位按键裁决、录音优先、
+ * 未握手不生效（voice_armed 的镜像条件） */
+static bool joy_armed(void)
+{
+  return g_joy_ok && g_pl.helloed &&
+         g_last_status != PL_ST_WAITING_CONFIRM && !mic_busy();
+}
+
+static void joy_dispatch(int dir)
+{
+  if (!joy_armed()) return;
+  pl_button(&g_pl, dir < 0 ? "prev" : "next", "short");
+  ESP_LOGI(TAG, "摇杆 %s", dir < 0 ? "← prev" : "next →");
+}
+
 static btn_t g_yes   = { .label = "YES",   .stable = 1, .last_raw = 1,
                          .gpio = (gpio_num_t)-1, .on_up = yes_up };
 static btn_t g_no    = { .label = "NO",    .stable = 1, .last_raw = 1,
@@ -224,11 +248,16 @@ static void petlink_task(void *arg)
   snprintf(dev_id, sizeof(dev_id), "p4-%02x%02x%02x", mac[3], mac[4], mac[5]);
 
   pl_cbs_t cbs = { io_send, ui_on_state, ui_on_hello_ok, io_uptime };
-  pl_init(&g_pl, &cbs, NULL, dev_id, "0.8.0");
+  pl_init(&g_pl, &cbs, NULL, dev_id, "0.9.0");
 
   vTaskDelay(pdMS_TO_TICKS(100)); /* 桥接芯片无枚举等待，留个稳定裕量 */
   pl_start(&g_pl, io_uptime(NULL));
   g_mic_ok = mic_init(&g_pl); /* 语音输入：录音任务 + audio 帧上行句柄 */
+#if defined(CONFIG_PETLINK_GPIO_JOY_X) && CONFIG_PETLINK_GPIO_JOY_X >= 0
+  joy_axis_init(&g_joy, 300, 180); /* 死区进入 30% / 迟滞退出 18%（宪法 §4.8） */
+  g_joy_ok = joystick_init(&g_joy); /* 含上电中心校准（32 次均值） */
+  if (!g_joy_ok) ESP_LOGW(TAG, "摇杆初始化失败——不影响按键授权主链路");
+#endif
   if (!spk_init()) ESP_LOGW(TAG, "状态提示音不可用（编译关或任务创建失败）");
   ESP_LOGI(TAG, "PetLink v%d 已启动 device=%s", PL_VER, dev_id);
 
@@ -241,6 +270,15 @@ static void petlink_task(void *arg)
     btn_poll(&g_yes, now);
     btn_poll(&g_no, now);
     if (g_voice.gpio >= 0) btn_poll(&g_voice, now);
+#if defined(CONFIG_PETLINK_GPIO_JOY_X) && CONFIG_PETLINK_GPIO_JOY_X >= 0
+    if (g_joy_ok) { /* 摇杆采样：4 次均值 ADC，微秒级，每拍都采 */
+      int32_t jmv = joystick_read_x();
+      if (jmv != INT32_MIN) {
+        int jev = joy_axis_feed(&g_joy, jmv, now);
+        if (jev != 0) joy_dispatch(jev);
+      }
+    }
+#endif
     pl_poll(&g_pl, now);
     /* 掉线沿：helloed 翻 false 时把 UI 推回 CONNECTING（petlink.c 零改动） */
     bool live = g_pl.helloed;

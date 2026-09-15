@@ -13,3 +13,8 @@ cc -O2 -Wall -Wextra -Wno-unused-parameter \
    test_ui_map.c ../main/ui_map.c \
    -o /tmp/ui_map_test
 /tmp/ui_map_test
+cc -O2 -Wall -Wextra -Wno-unused-parameter \
+   -I../main \
+   test_joystick.c ../main/joystick.c \
+   -o /tmp/joy_test
+/tmp/joy_test

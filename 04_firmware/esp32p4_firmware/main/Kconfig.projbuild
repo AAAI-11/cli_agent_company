@@ -33,6 +33,20 @@ menu "PetLink"
             默认 GPIO5 = 复刻底板 SW3。设 -1 退回双键布局
             （语音输入随之不可用）。
 
+    config PETLINK_GPIO_JOY_X
+        int "摇杆 X 轴 ADC GPIO 编号（-1=摇杆禁用）"
+        range -1 54
+        default -1
+        help
+            F17 摇杆导航（v3.5 宪法 §4.8）：复刻底板 5kΩ 自回中模拟
+            摇杆，X 轴左右推 → prev/next 事件，daemon 侧双向切焦点
+            会话 + tmux 视图同步。Y 轴与 SW 按下轴本期不接。
+            默认 -1 = 禁用（引脚号待原理图读数补，读出后 menuconfig
+            改即可，代码零改动）。GPIO 必须是 ADC 脚（ADC1/ADC2），
+            运行时探测失败只禁用摇杆，不影响主链路。
+            门控同语音输入：授权等待时让位、录音时不翻页、
+            未握手不生效。
+
     menu "PetLink UI"
 
         config PETLINK_UI_STAGE
