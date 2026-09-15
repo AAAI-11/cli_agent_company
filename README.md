@@ -83,7 +83,7 @@ cd daemon && npm install && npm start    # 起 daemon（macOS 需已装 Node 18+
 - [x] v0.9 摇杆导航（2026-09-14，F17，宪法 v3.5）：复刻底板 5kΩ 自回中摇杆 X 轴 ADC →
       prev/next 事件 → daemon 双向切焦点会话 + tmux 视图同步（select-window/select-pane）；
       语音注入目标跟焦点走（PETLINK_INJECT_PANE 降级为强制覆盖）；死区/迟滞/自动重复
-      状态机宿主机 24 项单测；引脚号待原理图读数（Kconfig 默认 -1 禁用，配好即亮）
+      状态机宿主机 24 项单测；X=GPIO21 已配（Y=GPIO20 本期不接，记档）
 - [ ] 冲刺：演示材料、答辩准备、**提交前仓库公开**（创新叙事 = 真开源补完）
 
 ## 协作与工具
