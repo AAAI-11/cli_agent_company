@@ -52,12 +52,19 @@ const ACTIVE_STALE_MS = 10 * 60 * 1000; // thinking/working/waiting_confirm 兜�
 
 class SessionRegistry {
   constructor() {
-    /** @type {Map<string, {agent:string,status:string,text:string,updated:number}>} */
+    /** @type {Map<string, {agent:string,status:string,text:string,pane:string,updated:number}>} */
     this.sessions = new Map();
   }
 
-  update(session, agent, status, text) {
-    this.sessions.set(session, { agent, status, text: String(text || '').slice(0, 32), updated: Date.now() });
+  update(session, agent, status, text, pane) {
+    // pane：F17 会话↔tmux pane 映射（petlink-hook 转发 $TMUX_PANE）。
+    // hook 未带 pane 不清空旧值——旧版 hook/手动 curl 都没有这字段
+    const prev = this.sessions.get(session);
+    this.sessions.set(session, {
+      agent, status, text: String(text || '').slice(0, 32),
+      pane: String(pane || prev?.pane || '').slice(0, 64),
+      updated: Date.now(),
+    });
   }
 
   /** 显式摘除（SessionEnd）。@returns {boolean} 是否真的摘了 */

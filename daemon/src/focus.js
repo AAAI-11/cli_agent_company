@@ -7,8 +7,8 @@
  * 规则（按优先级）：
  *  1. waiting_confirm 无条件抢占焦点——多会话的核心价值是不错过任何会话的授权
  *  2. 焦点会话被 sweep（done/error 超 TTL 淘汰）→ 回落到最新活跃会话
- *  3. 空闲态 NO 键循环切换（server.js onButton → focus.cycle()；
- *     有 permission 挂起时按键已被仲裁消费，不会走到切换）
+ *  3. 空闲态 NO 键 / 摇杆 prev-next 双向切换（server.js onButton →
+ *     focus.cycle(dir)；有 permission 挂起时按键已被仲裁消费，不会走到切换）
  *
  * 前向兼容：bubbles 是 state 帧的可选字段（协议 §3.4），旧设备按 §1 忽略未知字段；
  * 帧头 session/agent/status/text 永远是焦点会话——旧设备因此天然只演焦点，行为不变。
@@ -92,17 +92,19 @@ class FocusManager {
   }
 
   /**
-   * 空闲态 NO 键：循环切到下一个存活会话（按最近更新排序的环）。
+   * 切换焦点会话（按最近更新排序的环，F17 起双向）。
+   * @param {number} dir +1=next（NO 键/摇杆右推），-1=prev（摇杆左推）
    * @returns {object|null} 新焦点的 state 帧；null = 少于 2 个会话，无事可做
    */
-  cycle() {
+  cycle(dir = 1) {
     const live = this._live().map((s) => s.session);
     if (live.length < 2) return null;
-    const i = live.indexOf(this.focus);
-    this.focus = live[(i + 1) % live.length];
+    const n = live.length;
+    const i = Math.max(0, live.indexOf(this.focus)); // 焦点不在环内从队首起
+    this.focus = live[(i + (dir >= 0 ? 1 : n - 1)) % n];
     const f = this._live().find((s) => s.session === this.focus);
     if (!f) return null;
-    this.log(`[focus] NO 键切换焦点 → ${this.focus.slice(0, 8)}（${f.status}）`);
+    this.log(`[focus] 焦点切换（${dir < 0 ? 'prev' : 'next'}）→ ${this.focus.slice(0, 8)}（${f.status}）`);
     return this._out(f);
   }
 }

@@ -1,7 +1,7 @@
 # companion-daemon
 
-CLI Agent 伴侣桌面 daemon：Claude Code hooks 状态归一化 + PetLink v1 设备链路 + 语音输入输出 + 会话统计。
-协议见 [`docs/protocol.md`](../docs/protocol.md)（宪法：[需求说明文档 v3.1](../01_需求与方案/需求说明文档.md)）。
+CLI Agent 伴侣桌面 daemon：Claude Code hooks 状态归一化 + PetLink v1 设备链路 + 语音输入输出 + 会话统计 + 摇杆导航。
+协议见 [`docs/protocol.md`](../docs/protocol.md)（宪法：[需求说明文档](../01_需求与方案/需求说明文档.md)）。
 
 ## 运行（Day-1 形态）
 
@@ -63,7 +63,7 @@ curl -L -o models/ggml-small.bin \
   https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-small.bin   # 466MB，国内用 hf-mirror
 ```
 
-- 注入目标：唯一 tmux pane 时自动选它；多 pane 设 `PETLINK_INJECT_PANE=work:0.0`
+- 注入目标（v0.3 起）：`PETLINK_INJECT_PANE` 强制覆盖 > **焦点会话的 pane**（摇杆切到谁就念给谁）> 唯一 pane 时自动选它；都无则放弃
 - 可调：`PETLINK_WHISPER_MODEL`（模型路径）、`PETLINK_WHISPER_LANG`（默认 zh）
 - 缺依赖时 daemon 照常跑：首次收到音频才告警一次，按键授权主链路完全不受影响
 
@@ -89,6 +89,20 @@ YES 键（任意按）= 放行（v0.8 起无时长判档，旧固件遗留 `long
 - **空闲态按 NO 键循环切换焦点**（有授权挂起时 NO 仍是按下即拒，语义不被偷走）
 - 语音播报跟屏走：设备演的是谁，就念谁的状态
 
+## 摇杆导航（F17，v0.3，宪法 v3.5 §4.8）
+
+设备摇杆左右推 → `prev`/`next` button 帧 → daemon **双向切焦点会话**，并把 Mac 端
+tmux 视图同步过去（`select-window`/`select-pane` 跟到焦点会话的 pane）——
+摇杆在手，屏上宠物和终端窗口一起翻。
+
+- **会话↔pane 映射**：`hooks/petlink-hook.js` 在 Claude Code 的 tmux pane 里被拉起，
+  转发 `$TMUX_PANE` 给 `/state` 入册（旧版 hook/手动 curl 无此字段不影响）
+- **授权等待让位**：有 permission 挂起时 prev/next 被忽略（与固件 joy_armed
+  双层门控），YES/NO 裁决语义不被偷走
+- **语音注入跟焦点**：注入目标改为跟随焦点会话的 pane（见语音输入一节）
+- 视图同步 best-effort：焦点会话没上报 pane / 不在 tmux / 命令失败一律静默放弃，
+  绝不影响焦点切换本身
+
 ## token 消耗统计（F15，v0.6）
 
 daemon 增量 tail 各会话的 transcript（hook 载荷自带 `transcript_path`），从 assistant
@@ -102,8 +116,11 @@ daemon 增量 tail 各会话的 transcript（hook 载荷自带 `transcript_path`
 ## 冒烟测试
 
 ```bash
-npm run smoke    # Node WS 客户端扮演设备，全链路断言（28 项：含统计/语音/audio 重组/多会话焦点/token）
+npm run smoke    # Node WS 客户端扮演设备，全链路断言（39 项：含统计/语音/audio 重组/多会话焦点/token/摇杆导航）
 ```
+
+测试隔离：daemon 的 tmux 调用走 `PETLINK_TMUX_BIN` 指向的假脚本（smoke 自建），
+绝不碰真实 tmux 会话——与 `PETLINK_WHISPER_BIN` 同手法。
 
 ## 路线（W1）
 
@@ -112,3 +129,4 @@ npm run smoke    # Node WS 客户端扮演设备，全链路断言（28 项：�
 - [x] tmux send-keys 注入 adapter（`/inject`，2026-09-04 通）
 - [x] 语音输出 say 播报 + 会话统计 /stats（2026-09-07，v0.2）
 - [x] 语音输入：audio 重组 + whisper 转写 + tmux 注入（2026-09-07，v0.2）
+- [x] 摇杆导航：prev/next 双向切焦点 + tmux 视图同步 + 注入跟焦点（2026-09-14，v0.3，F17）

@@ -73,7 +73,12 @@ class PermissionManager {
       w.resolve('allow', '用户按下实体 Yes 键', `device:${dev}`);
       return true;
     }
-    return false; // voice 键不上行 button 帧（PTT 在固件本地消化）；其余留给未来自定义动作
+    return false; // prev/next 不在仲裁集（server.js 按等待态另行让位）；voice 键不上行 button 帧
+  }
+
+  /** 是否有授权挂起（F17：摇杆 prev/next 在等待期让位按键裁决） */
+  hasPending() {
+    return this.waiters.length > 0;
   }
 }
 
@@ -143,11 +148,14 @@ function createHttpServer({ registry, links, perms, inject, stats, voice, focus,
       if (!norm) return json(422, { ok: false, err: 'unmapped_event', event: eventName || null });
       const session = String(body.session_id || body.session || 'default').slice(0, 64);
       const agent = String(body.agent || 'claude-code');
+      // F17 会话↔tmux pane 映射：hook 转发器在 Claude Code 的 pane 里执行，
+      // $TMUX_PANE 天然可得；手动 curl 无此字段 → registry 保留旧值
+      const pane = String(body.tmux_pane || body.pane || '').slice(0, 64);
       // F15：hook 载荷带 transcript_path 就增量解析 token（enrich 在帧出口统一附 tokens）
       if (typeof body.transcript_path === 'string' && body.transcript_path) {
         tokens.poll(session, body.transcript_path);
       }
-      registry.update(session, agent, norm.status, norm.text);
+      registry.update(session, agent, norm.status, norm.text, pane);
       stats.status(session, norm.status);
       // F02R：组装帧永远以焦点会话为主体（后台会话只刷新 bubbles 不抢屏）；
       // 播报跟屏走——设备演的是谁，就念谁的状态

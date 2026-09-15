@@ -9,8 +9,11 @@
 const { execFile } = require('child_process');
 
 function tmux(args) {
+  // PETLINK_TMUX_BIN：注入适配器隔离阀（同 WHISPER_BIN 手法）——
+  // 测试/沙箱喂假 tmux 脚本，绝不碰真实会话
+  const bin = process.env.PETLINK_TMUX_BIN || 'tmux';
   return new Promise((resolve, reject) => {
-    execFile('tmux', args, { timeout: 3000 }, (err, stdout, stderr) => {
+    execFile(bin, args, { timeout: 3000 }, (err, stdout, stderr) => {
       if (err) { err.stderr = stderr; reject(err); } else resolve(stdout);
     });
   });
@@ -36,4 +39,16 @@ async function sendText(o) {
   return true;
 }
 
-module.exports = { listPanes, sendText };
+/**
+ * F17 摇杆导航的 Mac 端视图同步（宪法 v3.5 §4.8）：把焦点会话所在的
+ * window/pane 设为其会话的当前视图。select-window 改的是会话级当前窗口
+ * （所有附着该会话的终端一起跟），select-pane 再把活动面板落到目标上。
+ * best-effort：失败由调用方吞掉，绝不影响焦点切换本身。
+ */
+async function focusPane(pane) {
+  const win = String(pane).replace(/\.\d+$/, ''); // sess:2.1 → sess:2
+  await tmux(['select-window', '-t', win]);
+  await tmux(['select-pane', '-t', pane]);
+}
+
+module.exports = { listPanes, sendText, focusPane };

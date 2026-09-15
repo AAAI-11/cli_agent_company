@@ -107,11 +107,13 @@ daemon（桌面，常驻）                     device（实体固件 / 虚拟�
 
 | 字段 | 说明 |
 |---|---|
-| `key` | v1：`yes` / `no` / `btn3`（自定义键）；实体按键映射在固件 pinmap 定义 |
+| `key` | v1：`yes` / `no` / `btn3`（自定义键）；v0.9 增 `prev` / `next`（摇杆导航，F17）；实体按键映射在固件 pinmap 定义 |
 | `event` | `short` / `long` |
 
 **语义**：`yes` + `short` = 授权当前 `waiting_confirm` 的 permission 请求（创新点 F03 的回注通道）。
 `no`：有 permission 挂起 = 按下即拒；空闲（无挂起）= 循环切换多会话焦点（F02R）。
+`prev` / `next`（v0.9，宪法 v3.5 §4.8）：空闲态双向切换焦点会话并同步 Mac 端 tmux 视图；
+授权等待期让位按键裁决（固件 joy_armed 与 daemon 双层门控）。旧 daemon 忽略未知键（§1 演进规则），协议版本不变。
 
 ### 3.6 error（双向，可选）
 

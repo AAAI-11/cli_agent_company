@@ -29,6 +29,9 @@ stdin.on('end', () => {
     prompt: ev.prompt || '',
     message: ev.message || '',
     notification_type: ev.notification_type || '',
+    // F17 摇杆导航：本脚本在 Claude Code 的 tmux pane 里被拉起，$TMUX_PANE
+    // 天然可得——daemon 由此建立 会话↔pane 映射，摇杆切焦点后同步 Mac 视图
+    tmux_pane: process.env.TMUX_PANE || '',
     agent: 'claude-code',
   });
 

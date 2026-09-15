@@ -29,9 +29,9 @@ cd daemon && npm install && npm start    # 起 daemon（macOS 需已装 Node 18+
 
 | 目录 | 内容 | 测试 |
 |---|---|---|
-| `daemon/` | Node daemon：hooks 归一化 + USB/WS/TCP 链路 + permission 仲裁 + tmux 注入 + whisper 语音输入 + say 语音播报 + 会话统计 + 多会话焦点管理 + token 消耗统计 | `npm run smoke` 28 项 |
+| `daemon/` | Node daemon：hooks 归一化 + USB/WS/TCP 链路 + permission 仲裁 + tmux 注入 + whisper 语音输入 + say 语音播报 + 会话统计 + 多会话焦点管理 + token 消耗统计 + 摇杆导航 | `npm run smoke` 39 项 |
 | `virtual_device/` | 浏览器虚拟设备（纯静态，与实体板同协议同状态机、同款会话气泡与 token 行） | daemon smoke 内联覆盖 |
-| `04_firmware/esp32p4_firmware/` | ESP32-P4 固件（ESP-IDF v6.1 + LVGL)：PetLink 协议、六态 UI、PNG 素材槽、ES8311 录音、多会话气泡、token 行 | `sh test/run.sh` 58 项宿主单测 |
+| `04_firmware/esp32p4_firmware/` | ESP32-P4 固件（ESP-IDF v6.1 + LVGL)：PetLink 协议、六态 UI、PNG 素材槽、ES8311 录音、多会话气泡、token 行、摇杆导航 | `sh test/run.sh` 82 项宿主单测 |
 | `docs/protocol.md` | PetLink v1 协议规范（帧格式/握手/心跳/判活/防乒乓） | 与固件单测同源 |
 | `04_firmware/oled_board_test/` | 早期 OLED 板验证程序（历史存档） | — |
 
@@ -80,6 +80,10 @@ cd daemon && npm install && npm start    # 起 daemon（macOS 需已装 Node 18+
 - [x] v0.8 三键改版（2026-09-12，宪法 v3.4）：废除长按拒绝——YES 任意松开放行；
       语音改专用 VOICE 键按住说话（PTT，松手上传、上限 30s）；引脚适配复刻底板
       SW1/SW2/SW3 = GPIO50/49/5（原作开源硬件方案三，与原版"长按唤醒语音"习惯对齐）
+- [x] v0.9 摇杆导航（2026-09-14，F17，宪法 v3.5）：复刻底板 5kΩ 自回中摇杆 X 轴 ADC →
+      prev/next 事件 → daemon 双向切焦点会话 + tmux 视图同步（select-window/select-pane）；
+      语音注入目标跟焦点走（PETLINK_INJECT_PANE 降级为强制覆盖）；死区/迟滞/自动重复
+      状态机宿主机 24 项单测；引脚号待原理图读数（Kconfig 默认 -1 禁用，配好即亮）
 - [ ] 冲刺：演示材料、答辩准备、**提交前仓库公开**（创新叙事 = 真开源补完）
 
 ## 协作与工具

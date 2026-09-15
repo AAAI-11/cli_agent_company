@@ -58,11 +58,27 @@ const focus = new FocusManager(registry, log, (fr) => {
   return fr;
 });
 
+// F17 注入目标：PETLINK_INJECT_PANE 强制覆盖 > 焦点会话的 pane（摇杆切到
+// 谁就念给谁）> 唯一 pane > 放弃
 async function pickPane(logfn) {
   if (process.env.PETLINK_INJECT_PANE) return process.env.PETLINK_INJECT_PANE;
+  const foc = registry.snapshot().find((x) => x.session === focus.focus);
+  if (foc && foc.pane) return foc.pane;
   try { const panes = await inject.listPanes(); return panes.length === 1 ? panes[0].pane : null; } catch(e) { return null; }
 }
 
+// F17 焦点切换后同步 Mac 端 tmux 视图（宪法 v3.5 §4.8）。best-effort：
+// 无 pane / 不在 tmux / 失败一律静默，不拖累焦点切换本身
+async function followFocus(session) {
+  try {
+    const s = registry.snapshot().find((x) => x.session === session);
+    if (!s || !s.pane) return;
+    await inject.focusPane(s.pane);
+    log('[focus] tmux view -> ' + s.pane);
+  } catch(e) {}
+}
+
+/** 设备音频段完整到达（links.js 重组完）：ASR → 注入活动 pane */
 async function handleAudio(dev, { id, rate, pcm }) {
   if (!transcribe) { log('[voice-in] ' + dev + ' ASR unavailable'); stats.voiceFail(); return; }
   stats.voiceStart();
@@ -82,7 +98,14 @@ const links = new LinkManager({
   onButton: (key, event, dev) => {
     stats.button(key, event);
     if (perms.resolveButton(key, event, dev)) return;
-    if (key === 'no') { const f = focus.cycle(); if (f) links.broadcast(f); }
+    if (key === 'no') { const f = focus.cycle(); if (f) { links.broadcast(f); followFocus(f.session); } return; }
+    // F17 摇杆导航：prev/next 双向切焦点 + tmux 视图同步。授权等待让位按键
+    // 裁决——固件 joy_armed 已挡一道，这里防旧固件
+    if (key === 'prev' || key === 'next') {
+      if (perms.hasPending()) return;
+      const f = focus.cycle(key === 'prev' ? -1 : 1);
+      if (f) { links.broadcast(f); followFocus(f.session); }
+    }
   },
   onAudio: (dev, a) => { handleAudio(dev, a); },
 });

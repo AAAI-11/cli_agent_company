@@ -23,6 +23,16 @@ function check(name, ok, detail) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function main() {
+  // F17 测试隔离：假 tmux 脚本（同 WHISPER_BIN 手法）。daemon 的视图同步
+  // （select-window/select-pane）和注入只落本日志，绝不碰真实 tmux 会话
+  const fsMod = require('fs');
+  const osMod = require('os');
+  const fakeTmuxDir = fsMod.mkdtempSync(path.join(osMod.tmpdir(), 'petlink-faketmux-'));
+  const tmuxLogPath = path.join(fakeTmuxDir, 'calls.log');
+  const fakeTmux = path.join(fakeTmuxDir, 'tmux');
+  fsMod.writeFileSync(fakeTmux, `#!/bin/sh\necho "$@" >> ${tmuxLogPath}\nexit 0\n`);
+  fsMod.chmodSync(fakeTmux, 0o755);
+
   const daemon = spawn(process.execPath, [path.join(__dirname, '..', 'src', 'server.js'), '--fake'], {
     stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, PETLINK_HTTP: String(P.http), PETLINK_WS: String(P.ws), PETLINK_TCP: String(P.tcp),
@@ -30,6 +40,7 @@ async function main() {
            PETLINK_VOICE_DRY: '1',                 // 语音输出干跑：只记日志不真发声
            PETLINK_VOICE_GAP_MS: '1',               // 测试里三条播报间隔 <1s，默认 3s 冷却会吞掉
            PETLINK_WHISPER_BIN: '/nonexistent-whisper-test', // 语音输入走"缺依赖"路径（不依赖本机装没装）
+           PETLINK_TMUX_BIN: fakeTmux,              // F17：tmux 走假脚本，测试与真实会话物理隔离
            PETLINK_TOKENS_POLL_MS: '150' },            // F15 轮询缩短，等 500ms 即可验兜底刷新
   });
   const daemonLog = [];
@@ -183,10 +194,59 @@ async function main() {
     check('F02R 空闲 NO 键循环切换焦点', !!cyc && cyc.session !== 'sess-b2'
       && cyc.bubbles.filter((b) => b.f === 1).length === 1, `session=${cyc?.session} bubbles=${JSON.stringify(cyc?.bubbles)}`);
 
+    // 6b2) F17 摇杆导航（宪法 v3.5 §4.8）：tmux_pane 入册 / prev-next 双向
+    //      切焦点 / 授权等待让位 / Mac 视图同步（假 tmux 隔离）
+    const rj1 = await post6b({ event: 'UserPromptSubmit', session_id: 'sess-c1', prompt: '摇杆一', tmux_pane: 'pet:0.0' });
+    const rj2 = await post6b({ event: 'PreToolUse', session_id: 'sess-c2', tool_name: 'Edit', tmux_pane: 'pet:0.1' });
+    const stc = await fetch(`${HTTP}/status`).then((r) => r.json());
+    const c1sess = (stc.sessions || []).find((s) => s.session === 'sess-c1');
+    check('F17 hook 上报 tmux_pane 入册（/status 可查 pane）',
+      rj1.ok && rj2.ok && c1sess && c1sess.pane === 'pet:0.0', `pane=${c1sess?.pane}`);
+    // 焦点先定锚：c2 抢占（waiting_confirm），随后同会话 thinking 刷新不抢走
+    await post6b({ event: 'Notification', session_id: 'sess-c2', message: 'Claude needs your permission' });
+    await post6b({ event: 'UserPromptSubmit', session_id: 'sess-c2', prompt: '锚定' });
+    const getFocus = async () => (await fetch(`${HTTP}/status`).then((r) => r.json())).focus;
+    const fx0 = await getFocus();
+    // next：焦点移动 + 广播焦点帧
+    const rxn = rx.length;
+    ws.send(JSON.stringify({ ver: 1, type: 'button', key: 'next', event: 'short' }));
+    await sleep(400);
+    const fx1 = await getFocus();
+    const fnext = rx.slice(rxn).find((m) => m.type === 'state' && Array.isArray(m.bubbles));
+    check('F17 摇杆 next 切焦点（广播焦点帧）',
+      fx1 !== fx0 && typeof fx1 === 'string' && !!fnext && fnext.session === fx1
+        && fnext.bubbles.filter((b) => b.f === 1).length === 1,
+      `focus: ${fx0?.slice(0, 8)} → ${fx1?.slice(0, 8)}`);
+    // prev：双向，切回原焦点
+    ws.send(JSON.stringify({ ver: 1, type: 'button', key: 'prev', event: 'short' }));
+    await sleep(400);
+    const fx2 = await getFocus();
+    check('F17 摇杆 prev 双向切回', fx2 === fx0, `focus: ${fx1?.slice(0, 8)} → ${fx2?.slice(0, 8)}`);
+    // 授权等待让位：挂起 permission 期间 prev/next 不得切焦点，且不吞授权
+    const pj = fetch(`${HTTP}/permission`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: 'sess-c2', tool: 'Bash', prompt: 'x', timeout_ms: 8000 }),
+    }).then((r) => r.json());
+    await sleep(400); // 确保已挂起
+    ws.send(JSON.stringify({ ver: 1, type: 'button', key: 'next', event: 'short' }));
+    await sleep(300);
+    const fx3 = await getFocus();
+    check('F17 授权等待中摇杆让位（焦点不动）', fx3 === fx2, `focus=${fx3?.slice(0, 8)}`);
+    ws.send(JSON.stringify({ ver: 1, type: 'button', key: 'yes', event: 'short' }));
+    const dj = await pj;
+    check('F17 让位不吞授权（Yes 照常放行）', dj.hookSpecificOutput?.decision?.behavior === 'allow', JSON.stringify(dj).slice(0, 60));
+    // Mac 视图同步：焦点切到带 pane 的会话时，假 tmux 应收到 select-window/select-pane。
+    // 此刻焦点=c2（ring 头），next 落到 c1（pane pet:0.0）——带 pane 才会真同步
+    fsMod.writeFileSync(tmuxLogPath, ''); // 清账，只看这一刀
+    ws.send(JSON.stringify({ ver: 1, type: 'button', key: 'next', event: 'short' }));
+    await sleep(400);
+    const tmuxCalls = fsMod.readFileSync(tmuxLogPath, 'utf8');
+    check('F17 tmux 视图同步（select-window + select-pane 经注入适配器）',
+      tmuxCalls.includes('select-window') && tmuxCalls.includes('select-pane') && tmuxCalls.includes('pet:0.0'),
+      tmuxCalls.split('\n').filter(Boolean).join(' / ') || '未见调用');
+
     // 6c) F15 token 消耗显示（宪法 §4.5）：transcript 增量解析 → 焦点帧附 tokens；
     //     坏行/非 assistant 行忽略；无事件期的追加靠轮询兜底可见
-    const fsMod = require('fs');
-    const osMod = require('os');
     const tdir = fsMod.mkdtempSync(path.join(osMod.tmpdir(), 'petlink-tokens-'));
     const tfile = path.join(tdir, 'sess-t1.jsonl');
     const usageLine = (i, o, cc, cr) => JSON.stringify({
