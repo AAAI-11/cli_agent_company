@@ -24,19 +24,38 @@ const ui = {
   status: 'thinking',
   text: '正在连接 daemon…',
   session: '',
-  agent: '',              // daemon 侧管道标识（"codex-cli"/"claude-code"）
+  agent: '',
   bubbles: [],
   tokens: null,
   connected: false,
 };
 
-/* ---------- 形象素材槽 ---------- */
+/* ---------- 形象素材槽：按 agent 分目录加载 PNG ---------- */
 const IMG_SIZE = 176;
-const stateImgs = {};
+const stateImgs = {};       // flat: {thinking: img, ...} — fallback for default/unknown agent
+const agentImgs = {};       // {codex: {thinking: img, ...}, claude: {...}}
+
 for (const s of Object.keys(STATE_STYLE)) {
   const img = new Image();
   img.onload = () => { stateImgs[s] = img; };
   img.src = `assets/${s}.png`;
+}
+
+// agent 分目录：加载 assets/codex/thinking.png 等
+for (const agent of ['codex', 'claude']) {
+  agentImgs[agent] = {};
+  for (const s of Object.keys(STATE_STYLE)) {
+    const img = new Image();
+    img.onload = ((as, ss) => { return () => { agentImgs[as][ss] = img; }; })(agent, s);
+    img.src = `assets/${agent}/${s}.png`;
+  }
+}
+
+function pickImg(status, agent) {
+  if (!agent) return stateImgs[status];
+  const key = agent.startsWith('codex') ? 'codex' : (agent === 'claude-code' || agent === 'claude' ? 'claude' : null);
+  if (key && agentImgs[key] && agentImgs[key][status]) return agentImgs[key][status];
+  return stateImgs[status];
 }
 
 /* ---------- 协议客户端 ---------- */
@@ -166,7 +185,6 @@ function draw(t) {
   ctx.textAlign = 'left';
   ctx.fillText('PETLINK/1', 10, 22);
 
-  // Agent 徽标：标题右侧小色块 + 标签
   const as = agentStyle(ui.agent);
   if (as.label) {
     ctx.font = '700 9px ui-monospace, monospace';
@@ -218,7 +236,7 @@ function draw(t) {
 
   ctx.save();
   ctx.translate(cx + shake, cy + bob);
-  const img = stateImgs[s];
+  const img = pickImg(s, ui.agent);
   if (img) {
     ctx.drawImage(img, -IMG_SIZE / 2, -IMG_SIZE / 2, IMG_SIZE, IMG_SIZE);
   } else {
