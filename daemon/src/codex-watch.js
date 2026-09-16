@@ -19,6 +19,7 @@ var MAP = {
 
 var TERMINAL = { agent_message: 1, task_complete: 1 };
 var DONE_IDLE_MS = 4000;
+var SESSION_PREFIX = "codex";
 
 class CodexWatch {
   constructor(opts) {
@@ -28,44 +29,37 @@ class CodexWatch {
     this.voi = opts.voice;
     this.lnk = opts.links;
     this.log = opts.log || function () {};
-    this.sid = "codex-cli";
     this.ms = 1500;
-    this.cur = "done";
-    this._lastEv = "";
-    this._lastTs = 0;
     this._tracked = {};
     this._errs = 0;
-    this._idleTicks = 0;
     this._registered = false;
   }
 
   start() {
-    // Don't register immediately — wait until we discover at least one real session
-    // file to avoid a stray "codex-cli" bubble when no sessions exist yet.
     this._timer = setInterval(this._scan.bind(this), this.ms);
     if (this._timer.unref) this._timer.unref();
   }
 
   stop() { if (this._timer) clearInterval(this._timer); }
 
+  /** 从 JSONL 路径提取唯一 session ID */
+  _sidFromFile(fp) {
+    var name = path.basename(fp, ".jsonl");
+    var m = name.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/);
+    if (m) return SESSION_PREFIX + ":" + m[1];
+    return SESSION_PREFIX + ":" + name.slice(-16);
+  }
+
   _scan() {
     try {
       var now = Date.now();
-      var status = null;
-      var reason = "";
-      var locked = false;
-
-      // Track ALL session files regardless of age.
-      // New sessions get discovered here; existing ones get polled for growth.
       var seen = {};
       try { this._walk(ROOT, seen); } catch (e) {}
       var hasSessions = Object.keys(seen).length > 0;
 
-      // Defer first registration until we see at least one real session file.
       if (hasSessions && !this._registered) {
         this._registered = true;
-        this.reg.update(this.sid, "codex-cli", "done", "watching");
-        this.log("[codex-watch] registered session after discovering " + Object.keys(seen).length + " file(s) in " + ROOT);
+        this.log("[codex-watch] registered after discovering " + Object.keys(seen).length + " file(s) in " + ROOT);
       }
 
       var fp;
@@ -74,14 +68,17 @@ class CodexWatch {
         var trk = this._tracked[fp];
 
         if (!trk) {
-          // First time seeing this file: start at its current tail
-          this._tracked[fp] = { off: sz };
-          // silent init
+          var sid = this._sidFromFile(fp);
+          this._tracked[fp] = { off: sz, sid: sid, cur: "done", lastEv: "", lastTs: 0, idleTicks: 0, lastStatus: null };
           continue;
         }
 
         if (sz <= trk.off) continue;
         if (sz < trk.off) trk.off = 0;
+
+        var status = null;
+        var reason = "";
+        var locked = false;
 
         try {
           var fd = fs.openSync(fp, "r");
@@ -100,54 +97,66 @@ class CodexWatch {
               var pt = p.type || "";
               if (MAP[pt]) {
                 var s = MAP[pt];
-                if (s === "done") { locked = false; status = s; reason = pt; this._lastTs = now; this._lastEv = pt; }
-                else if (!locked || s === "working") { status = s; reason = pt; this._lastTs = now; this._lastEv = pt; if (s === "working") locked = true; }
+                if (s === "done") { locked = false; status = s; reason = pt; trk.lastTs = now; trk.lastEv = pt; }
+                else if (!locked || s === "working") { status = s; reason = pt; trk.lastTs = now; trk.lastEv = pt; if (s === "working") locked = true; }
               }
             } catch (e) {}
           }
         } catch (e) {
           delete this._tracked[fp];
+          continue;
+        }
+
+        /* 每文件的独立状态机 */
+        if (status && status !== trk.cur) {
+          trk.idleTicks = 0;
+          trk.cur = status;
+          this.log("[codex-watch] " + trk.sid + " => " + status + " (" + reason + ")");
+          this.reg.update(trk.sid, "codex-cli", status, reason);
+          try { this.sta.status(trk.sid, status); } catch (e) {}
+          try {
+            var f = this.foc.frame(trk.sid, "codex-cli", status, reason);
+            if (f && this.lnk) { this.voi.announceStatus(f.status, f.text); this.lnk.broadcast(f); }
+          } catch (e) {}
+        } else if (TERMINAL[trk.lastEv] && now - trk.lastTs > DONE_IDLE_MS && trk.cur !== "done") {
+          trk.idleTicks++;
+          if (trk.idleTicks >= 2) {
+            trk.cur = "done";
+            this.log("[codex-watch] " + trk.sid + " => done (idle)");
+            this.reg.update(trk.sid, "codex-cli", "done", "idle");
+            try { this.sta.status(trk.sid, "done"); } catch (e) {}
+            try {
+              var f = this.foc.frame(trk.sid, "codex-cli", "done", "idle");
+              if (f && this.lnk) { this.voi.announceStatus(f.status, f.text); this.lnk.broadcast(f); }
+            } catch (e) {}
+            trk.idleTicks = 0;
+          }
+        } else {
+          trk.idleTicks = 0;
         }
       }
 
-      // Cleanup trackers for files removed from disk
+      /* 文件被删除 → 从注册表摘除会话并刷新设备显示 */
       var keys = Object.keys(this._tracked);
       for (var k = 0; k < keys.length; k++) {
         if (!seen[keys[k]]) {
-          try { fs.statSync(keys[k]); } catch (e) { delete this._tracked[keys[k]]; }
+          try { fs.statSync(keys[k]); } catch (e) {
+            var removedSid = this._tracked[keys[k]].sid;
+            this.reg.remove(removedSid);
+            this.log("[codex-watch] file removed, unregistered: " + removedSid);
+            delete this._tracked[keys[k]];
+            try {
+              var rf = this.foc.reframe();
+              if (rf && this.lnk) this.lnk.broadcast(rf);
+            } catch (e) {}
+          }
         }
-      }
-
-      // State transition
-      if (status && status !== this.cur) {
-        this._idleTicks = 0;
-        this._go(status, reason);
-      } else if (TERMINAL[this._lastEv] && now - this._lastTs > DONE_IDLE_MS && this.cur !== "done") {
-        this._idleTicks++;
-        if (this._idleTicks >= 2) {
-          this._go("done", "idle");
-          this._idleTicks = 0;
-        }
-      } else {
-        this._idleTicks = 0;
       }
 
     } catch (e) {
       this._errs++;
       if (this._errs <= 3) this.log("[codex-watch] err: " + e.message.slice(0, 80));
     }
-  }
-
-  _go(s, txt) {
-    if (s === this.cur) return;
-    this.cur = s;
-    this.log("[codex-watch] => " + s + " (" + txt + ")");
-    try { this.reg.update(this.sid, "codex-cli", s, txt); } catch (e) {}
-    try { this.sta.status(this.sid, s); } catch (e) {}
-    try {
-      var f = this.foc.frame(this.sid, "codex-cli", s, txt);
-      if (f && this.lnk) { this.voi.announceStatus(f.status, f.text); this.lnk.broadcast(f); }
-    } catch (e) {}
   }
 
   _walk(dir, out) {
