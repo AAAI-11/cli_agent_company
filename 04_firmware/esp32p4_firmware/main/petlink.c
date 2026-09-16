@@ -1,4 +1,4 @@
-/**
+﻿/**
  * PetLink v1 设备端协议核心实现。接口语义见 petlink.h，帧格式见 docs/protocol.md。
  * JSON 解码用 cJSON（components/cjson，MIT）；出站帧全部字段受控，直接 snprintf。
  */
@@ -92,7 +92,7 @@ void pl_audio(pl_t *pl, const char *id, unsigned seq, bool end, unsigned rate,
 {
   if (!id || (n == 0 && !end)) return;
 
-  if (end) { /* 收尾帧不带数据 */
+  if (end) {
     int hl = snprintf(pl->out_audio, sizeof(pl->out_audio),
                       "{\"ver\":%d,\"type\":\"audio\",\"id\":\"%s\",\"seq\":%u,\"end\":true}",
                       PL_VER, id, seq);
@@ -106,7 +106,7 @@ void pl_audio(pl_t *pl, const char *id, unsigned seq, bool end, unsigned rate,
                     PL_VER, id, seq, rate);
   if (hl <= 0) return;
   size_t bl = b64_encode(pcm, n, pl->out_audio + hl, sizeof(pl->out_audio) - hl - 3);
-  if (bl == 0) return; /* 超帧限：调用方按 PL_AUDIO_CHUNK 分块即不会走到 */
+  if (bl == 0) return;
   pl->out_audio[hl + bl] = '"';
   pl->out_audio[hl + bl + 1] = '}';
   pl->out_audio[hl + bl + 2] = '\0';
@@ -133,13 +133,11 @@ void pl_feed(pl_t *pl, const char *bytes, size_t n, uint32_t now_ms)
   for (size_t i = 0; i < n; i++) {
     char c = bytes[i];
     if (c == '\n') {
-      /* 完整一行：剥掉可能的 \r，空行跳过 */
       if (pl->len > 0 && pl->buf[pl->len - 1] == '\r') pl->len--;
       pl->buf[pl->len] = '\0';
       if (pl->len > 0) pl_handle_line(pl, pl->buf, now_ms);
-      pl->len = 0; /* 换行即重新同步点：垃圾行之后的下一行总是干净的 */
+      pl->len = 0;
     } else {
-      /* 协议 §4：单帧上限 4KB。超限后不再缓冲，静默丢弃直到下一个换行 */
       if (pl->len < PL_MAX_LINE) {
         pl->buf[pl->len++] = c;
       }
@@ -151,39 +149,49 @@ void pl_feed(pl_t *pl, const char *bytes, size_t n, uint32_t now_ms)
 
 static pl_status_t status_from(const char *s)
 {
-  if (!s) return PL_ST_CONNECTING; /* 不认识就当没收到，由调用方忽略 */
+  if (!s) return PL_ST_CONNECTING;
   if (strcmp(s, "thinking") == 0)         return PL_ST_THINKING;
   if (strcmp(s, "working") == 0)          return PL_ST_WORKING;
   if (strcmp(s, "waiting_confirm") == 0)  return PL_ST_WAITING_CONFIRM;
   if (strcmp(s, "done") == 0)             return PL_ST_DONE;
   if (strcmp(s, "error") == 0)            return PL_ST_ERROR;
-  return PL_ST_CONNECTING; /* 未知 status：前向兼容，忽略 */
+  return PL_ST_CONNECTING;
+}
+
+/* 提取 agent 标识（最长 PL_AGENT_LEN），回退零串 */
+static void agent_from(const cJSON *root, char *out, size_t cap)
+{
+  out[0] = '\0';
+  const cJSON *a = cJSON_GetObjectItem(root, "agent");
+  const char *s = cJSON_GetStringValue((cJSON *)a);
+  if (s) {
+    size_t n = strlen(s);
+    if (n >= cap) n = cap - 1;
+    memcpy(out, s, n);
+    out[n] = '\0';
+  }
 }
 
 static void pl_handle_line(pl_t *pl, const char *line, uint32_t now_ms)
 {
   cJSON *root = cJSON_Parse(line);
-  if (!root) return; /* 坏 JSON（含启动日志等噪声）静默丢弃 */
+  if (!root) return;
 
   const cJSON *type = cJSON_GetObjectItem(root, "type");
   const char *t = cJSON_GetStringValue((cJSON *)type);
   if (!t) { cJSON_Delete(root); return; }
 
-  /* ver 校验（协议 §1：设备端 v1 只处理 ver:1，其余忽略） */
   const cJSON *ver = cJSON_GetObjectItem(root, "ver");
   if (cJSON_IsNumber(ver) && (int)ver->valuedouble != PL_VER) {
     cJSON_Delete(root);
     return;
   }
 
-  /* 判活只认携带会话意义的帧：hello_ok / heartbeat / state。
-   * error/未知帧不算——2026-09-02 真机事故：daemon 对孤儿设备回 error，
-   * 恰好把设备侧 90s 判活窗无限续期，设备永不降级重握手，双方死锁闪断 */
   if (strcmp(t, "hello_ok") == 0) {
     pl->last_rx_ms = now_ms;
     if (!pl->helloed) {
       pl->helloed = true;
-      pl->last_hb_ms = now_ms; /* 心跳节拍锚定到握手时刻，避免握手后立刻补发 */
+      pl->last_hb_ms = now_ms;
       const cJSON *dv = cJSON_GetObjectItem(root, "daemon_ver");
       const char *v = cJSON_GetStringValue((cJSON *)dv);
       if (pl->cbs.on_hello_ok) pl->cbs.on_hello_ok(v ? v : "?" , pl->ctx);
@@ -191,7 +199,7 @@ static void pl_handle_line(pl_t *pl, const char *line, uint32_t now_ms)
   } else if (strcmp(t, "heartbeat") == 0) {
     pl->last_rx_ms = now_ms;
     const cJSON *reply = cJSON_GetObjectItem(root, "reply");
-    if (!cJSON_IsTrue(reply)) { /* 防乒乓：只应答探测，不应答应答 */
+    if (!cJSON_IsTrue(reply)) {
       pl_send_heartbeat(pl, true);
     }
   } else if (strcmp(t, "state") == 0) {
@@ -200,28 +208,30 @@ static void pl_handle_line(pl_t *pl, const char *line, uint32_t now_ms)
     const char *s = cJSON_GetStringValue((cJSON *)st);
     pl_status_t mapped = status_from(s);
 
-    /* F02R 多会话气泡（协议 §3.4 可选字段）：每帧整体覆盖；未携带则清空。
-     * 未知 st 的项跳过（前向兼容），超上限截断 */
+    /* 提取 agent 标识 */
+    char agent[PL_AGENT_LEN];
+    agent_from(root, agent, sizeof(agent));
+
+    /* F02R 多会话气泡 */
     pl->bubble_n = 0;
     if (mapped != PL_ST_CONNECTING) {
       const cJSON *bub = cJSON_GetObjectItem(root, "bubbles");
       const cJSON *e = NULL;
       cJSON_ArrayForEach(e, bub) {
         if (pl->bubble_n >= PL_MAX_BUBBLES) break;
-        if (!cJSON_IsObject(e)) continue; /* 非对象项：跳过，不拖垮后面的项 */
+        if (!cJSON_IsObject(e)) continue;
         const cJSON *bst = cJSON_GetObjectItem(e, "st");
         pl_status_t bm = status_from(cJSON_GetStringValue((cJSON *)bst));
-        if (bm == PL_ST_CONNECTING) continue; /* 缺 st/未知状态：跳过该项 */
+        if (bm == PL_ST_CONNECTING) continue;
         const cJSON *bf = cJSON_GetObjectItem(e, "f");
         pl->bubbles[pl->bubble_n].st = bm;
         pl->bubbles[pl->bubble_n].focus = cJSON_IsTrue(bf) ||
-            (cJSON_IsNumber(bf) && bf->valuedouble != 0); /* daemon 发数字 0/1 */
+            (cJSON_IsNumber(bf) && bf->valuedouble != 0);
         pl->bubble_n++;
       }
     }
 
-    /* F15 token 消耗（协议 §3.4 可选 tokens 字段）：帧未携带/字段非法则
-     * 整体无效——UI 维持隐藏，不用半截数字 */
+    /* F15 token 消耗 */
     pl->tokens_valid = false;
     if (mapped != PL_ST_CONNECTING) {
       const cJSON *tk = cJSON_GetObjectItem(root, "tokens");
@@ -238,15 +248,16 @@ static void pl_handle_line(pl_t *pl, const char *line, uint32_t now_ms)
     if (mapped != PL_ST_CONNECTING && pl->cbs.on_state) {
       const cJSON *sess = cJSON_GetObjectItem(root, "session");
       const cJSON *text = cJSON_GetObjectItem(root, "text");
+      /* agent 已提取，空串表示未携带 */
       pl->cbs.on_state(mapped,
                        cJSON_GetStringValue((cJSON *)sess),
+                       agent[0] ? agent : NULL,
                        cJSON_GetStringValue((cJSON *)text),
                        pl->bubbles, pl->bubble_n,
                        pl->tokens_valid ? &pl->tokens : NULL,
                        pl->ctx);
     }
   }
-  /* hello / button / error / 未知 type：设备端不关心，静默忽略（前向兼容） */
 
   cJSON_Delete(root);
 }
@@ -275,13 +286,12 @@ void pl_poll(pl_t *pl, uint32_t now_ms)
 {
   if (!pl->helloed) {
     if (now_ms - pl->last_hello_ms >= PL_HEARTBEAT_MS) {
-      pl_send_hello(pl, now_ms); /* 握手没确认：每 5s 重发 hello */
+      pl_send_hello(pl, now_ms);
     }
     return;
   }
 
   if (now_ms - pl->last_rx_ms > PL_DEAD_MS) {
-    /* 判活窗口超时：重握手（协议 §2 链路死亡由设备侧重连） */
     pl->helloed = false;
     pl_send_hello(pl, now_ms);
     return;

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * petlink-fw v0.9 —— ESP32-P4 固件入口（三键 + 按住说话 + 摇杆导航版）。
  *
  * 链路：UART0 @921600（板上 USB-C 经 CH343 桥接到 UART0——微雪 P4-WIFI6 的
@@ -8,7 +8,7 @@
  *       YES 任意按下松开 = 放行（不再有时长判档——长按拒绝手势 v0.8 废除）；
  *       NO 键按下即拒（不看时长，2026-09-03 真机两次没按准 600ms 的教训）；
  *       VOICE 键按住说话（PTT）：按下开始录音、松手上传（与原版哈基米机
- *       「长按唤醒语音」的用户习惯对齐）
+ *        「长按唤醒语音」的用户习惯对齐）
  * 摇杆：X 轴 ADC（F17，v3.5 §4.8）——左右推动 → button 帧 prev/next，
  *       daemon 侧双向切焦点会话 + tmux 视图同步。GPIO -1 = 禁用（默认，
  *       引脚号待原理图读数补）。与语音同门控哲学：授权等待时让位
@@ -45,12 +45,11 @@ static const char *TAG = "petlink";
 /* ---------------- 协议核心的 IO 绑定 ---------------- */
 
 static pl_t g_pl;
-static SemaphoreHandle_t s_tx_mu; /* UART TX 互斥：协议任务与 mic 任务并发出站 */
+static SemaphoreHandle_t s_tx_mu;
 
 static void io_send(const char *line, void *ctx)
 {
   (void)ctx;
-  /* 整行原子写出：两个任务并发发帧时绝不互相劈行 */
   xSemaphoreTake(s_tx_mu, portMAX_DELAY);
   uart_write_bytes(UART_NUM_0, line, strlen(line));
   uart_write_bytes(UART_NUM_0, "\n", 1);
@@ -63,12 +62,9 @@ static uint32_t io_uptime(void *ctx)
   return (uint32_t)(esp_timer_get_time() / 1000);
 }
 
-/* UI 钩子：v0.2 屏幕接管——快照推送给 LVGL 任务渲染（text 暂不上屏：
- * 字体是 21 符号子集，任意中文会显 '?'，v0.3 素材/文本槽再扩） */
 static char g_last_sess[16] = "";
-static pl_status_t g_last_status = PL_ST_CONNECTING; /* 语音输入的门控用（voice_armed） */
+static pl_status_t g_last_status = PL_ST_CONNECTING;
 
-/* 截到容量上限且不劈开 UTF-8 多字节字符（截在续字节上就回退到字符起点） */
 static void copy_utf8_bounded(char *dst, size_t cap, const char *src)
 {
   size_t n = src ? strlen(src) : 0;
@@ -78,15 +74,18 @@ static void copy_utf8_bounded(char *dst, size_t cap, const char *src)
   dst[n] = '\0';
 }
 
-static void ui_on_state(pl_status_t st, const char *session, const char *text,
+/* on_state 回调：agent 为 daemon 侧会话的管道标识（"codex-cli"/"claude-code"等），
+ * 空/未知时用空串。pet_ui_snap_t 自动带 agent 字段供渲染层区分图标。 */
+static void ui_on_state(pl_status_t st, const char *session, const char *agent,
+                        const char *text,
                         const pl_bubble_t *bubbles, uint8_t bubble_n,
                         const pl_tokens_t *tokens, void *ctx)
 {
   (void)ctx;
   g_last_status = st;
-  spk_alert(st); /* F16 状态提示音：三态转移触发（同状态去重在 spk.c） */
-  ESP_LOGI(TAG, "[ui] %s  session=%s  text=%s  bubbles=%u  tokens=%s",
-           pl_status_name(st), session ? session : "-", text ? text : "-",
+  spk_alert(st);
+  ESP_LOGI(TAG, "[ui] %s  agent=%s  session=%s  text=%s  bubbles=%u  tokens=%s",
+           pl_status_name(st), agent ? agent : "-", session ? session : "-", text ? text : "-",
            bubbles ? bubble_n : 0,
            tokens ? "y" : "-");
   pet_ui_snap_t snap = {
@@ -95,6 +94,7 @@ static void ui_on_state(pl_status_t st, const char *session, const char *text,
   };
   snprintf(snap.session, sizeof(snap.session), "%s", session ? session : "");
   snprintf(g_last_sess, sizeof(g_last_sess), "%s", session ? session : "");
+  snprintf(snap.agent, sizeof(snap.agent), "%s", agent ? agent : "");
   copy_utf8_bounded(snap.text, sizeof(snap.text), text);
   if (bubbles && bubble_n > PL_MAX_BUBBLES) bubble_n = PL_MAX_BUBBLES;
   snap.bubble_n = bubble_n;
@@ -109,9 +109,6 @@ static void ui_on_hello_ok(const char *daemon_ver, void *ctx)
   (void)ctx;
   ESP_LOGI(TAG, "[ui] 握手完成 daemon=%s", daemon_ver);
   pet_ui_link(true);
-  /* 掉线沿曾把 UI 推回 CONNECTING，pet_ui_link 只点亮 link_live 不改 state，
-   * 不主动恢复就永远卡"正在连接"（2026-09-08 真机教训）。回空闲绿脸；
-   * 若 daemon 侧会话仍在进行，由 daemon 握手后重推 state 覆盖 */
   pet_ui_snap_t snap = {
     .state = PL_ST_DONE,
     .link_live = true,
@@ -125,32 +122,29 @@ static void ui_on_hello_ok(const char *daemon_ver, void *ctx)
 
 typedef struct {
   gpio_num_t gpio;
-  const char *label; /* 日志标签 */
-  int stable;        /* 稳定电平：1=松开（上拉），0=按下 */
-  int last_raw;      /* 最近原始电平 */
-  uint32_t t_raw;    /* 原始电平跳变时刻（消抖观察窗起点） */
-  uint32_t t_press;  /* 按下起点（日志用） */
-  void (*on_down)(void); /* 按下沿动作（可空） */
-  void (*on_up)(void);   /* 松开沿动作（可空） */
+  const char *label;
+  int stable;
+  int last_raw;
+  uint32_t t_raw;
+  uint32_t t_press;
+  void (*on_down)(void);
+  void (*on_up)(void);
 } btn_t;
 
-static bool g_mic_ok; /* 语音输入可用（编译开 + mic_init 成功） */
+static bool g_mic_ok;
 
-/* YES：任意松开 = 放行（v0.8 起无时长判档——长按拒绝手势废除） */
 static void yes_up(void)
 {
   pl_button(&g_pl, "yes", "short");
   ESP_LOGI(TAG, "YES→allow");
 }
 
-/* NO：松开上报，裁决在 daemon（deny；空闲态另有切焦点职责，都在 daemon 侧） */
 static void no_up(void)
 {
   pl_button(&g_pl, "no", "short");
   ESP_LOGI(TAG, "NO→deny");
 }
 
-/* 语音输入武装条件：编译开 + 初始化过 + 已握手 + 不在授权等待 + 不忙 */
 static bool voice_armed(void)
 {
   return g_mic_ok && g_pl.helloed &&
@@ -169,7 +163,7 @@ static void voice_down(void)
 
 static void voice_up(void)
 {
-  if (mic_busy()) { /* 录音中松手 = 结束并上传；到达上限自动停后这里是空操作 */
+  if (mic_busy()) {
     ESP_LOGI(TAG, "VOICE 松开 → 结束录音并上传");
     mic_stop();
   }
@@ -177,11 +171,9 @@ static void voice_up(void)
 
 /* ---------------- 摇杆导航（F17，v3.5 §4.8） ---------------- */
 
-static joy_axis_t g_joy; /* X 轴状态机（死区/迟滞/自动重复，纯逻辑可单测） */
-static bool g_joy_ok;   /* 摇杆可用（配脚 + joystick_init 成功含中心校准） */
+static joy_axis_t g_joy;
+static bool g_joy_ok;
 
-/* 摇杆门控：与语音输入同哲学——授权等待让位按键裁决、录音优先、
- * 未握手不生效（voice_armed 的镜像条件） */
 static bool joy_armed(void)
 {
   return g_joy_ok && g_pl.helloed &&
@@ -213,19 +205,19 @@ static void btn_init(btn_t *b, gpio_num_t gpio)
 static void btn_poll(btn_t *b, uint32_t now)
 {
   int raw = gpio_get_level(b->gpio);
-  if (raw != b->last_raw) {          /* 电平跳了：重开观察窗 */
+  if (raw != b->last_raw) {
     b->last_raw = raw;
     b->t_raw = now;
     return;
   }
-  if (now - b->t_raw < DEBOUNCE_MS) return; /* 窗内不出结论 */
-  if (raw == b->stable) return;      /* 结论与现状一致，无事 */
+  if (now - b->t_raw < DEBOUNCE_MS) return;
+  if (raw == b->stable) return;
 
   b->stable = raw;
-  if (raw == 0) {                    /* 按下沿 */
+  if (raw == 0) {
     b->t_press = now;
     if (b->on_down) b->on_down();
-  } else {                           /* 松开沿 */
+  } else {
     if (b->on_up) b->on_up();
   }
 }
@@ -236,12 +228,9 @@ static void petlink_task(void *arg)
 {
   (void)arg;
 
-  /* UART0 = 控制台 + PetLink 同流（CH343 桥到 USB-C）。日志与协议帧交错，
-   * daemon 对坏行静默丢弃——与协议核心的容错设计互为犄角 */
   ESP_ERROR_CHECK(uart_driver_install(UART_NUM_0, 1024, 1024, 0, NULL, 0));
   s_tx_mu = xSemaphoreCreateMutex();
 
-  /* 设备标识：p4-<MAC 后 3 字节 hex>（协议 §3.1） */
   uint8_t mac[6];
   esp_read_mac(mac, ESP_MAC_BASE);
   char dev_id[16];
@@ -250,12 +239,12 @@ static void petlink_task(void *arg)
   pl_cbs_t cbs = { io_send, ui_on_state, ui_on_hello_ok, io_uptime };
   pl_init(&g_pl, &cbs, NULL, dev_id, "0.9.0");
 
-  vTaskDelay(pdMS_TO_TICKS(100)); /* 桥接芯片无枚举等待，留个稳定裕量 */
+  vTaskDelay(pdMS_TO_TICKS(100));
   pl_start(&g_pl, io_uptime(NULL));
-  g_mic_ok = mic_init(&g_pl); /* 语音输入：录音任务 + audio 帧上行句柄 */
+  g_mic_ok = mic_init(&g_pl);
 #if defined(CONFIG_PETLINK_GPIO_JOY_X) && CONFIG_PETLINK_GPIO_JOY_X >= 0
-  joy_axis_init(&g_joy, 300, 180); /* 死区进入 30% / 迟滞退出 18%（宪法 §4.8） */
-  g_joy_ok = joystick_init(&g_joy); /* 含上电中心校准（32 次均值） */
+  joy_axis_init(&g_joy, 300, 180);
+  g_joy_ok = joystick_init(&g_joy);
   if (!g_joy_ok) ESP_LOGW(TAG, "摇杆初始化失败——不影响按键授权主链路");
 #endif
   if (!spk_init()) ESP_LOGW(TAG, "状态提示音不可用（编译关或任务创建失败）");
@@ -271,7 +260,7 @@ static void petlink_task(void *arg)
     btn_poll(&g_no, now);
     if (g_voice.gpio >= 0) btn_poll(&g_voice, now);
 #if defined(CONFIG_PETLINK_GPIO_JOY_X) && CONFIG_PETLINK_GPIO_JOY_X >= 0
-    if (g_joy_ok) { /* 摇杆采样：4 次均值 ADC，微秒级，每拍都采 */
+    if (g_joy_ok) {
       int32_t jmv = joystick_read_x();
       if (jmv != INT32_MIN) {
         int jev = joy_axis_feed(&g_joy, jmv, now);
@@ -280,7 +269,6 @@ static void petlink_task(void *arg)
     }
 #endif
     pl_poll(&g_pl, now);
-    /* 掉线沿：helloed 翻 false 时把 UI 推回 CONNECTING（petlink.c 零改动） */
     bool live = g_pl.helloed;
     if (was_live && !live) {
       pet_ui_snap_t drop = {
@@ -288,7 +276,7 @@ static void petlink_task(void *arg)
         .link_live = false,
       };
       snprintf(drop.session, sizeof(drop.session), "%s", g_last_sess);
-      drop.text[0] = '\0'; /* 掉线清标签：胶囊下方回退显示"正在连接" */
+      drop.text[0] = '\0';
       pet_ui_push(&drop);
       ESP_LOGW(TAG, "链路掉线 → UI 回 CONNECTING");
     }
@@ -299,26 +287,22 @@ static void petlink_task(void *arg)
 void app_main(void)
 {
 #if CONFIG_PETLINK_UI_STAGE == 0
-  /* v0.1 无屏模式：一键回退保险 */
   xTaskCreate(petlink_task, "petlink", 4096, NULL, 5, NULL);
 #elif CONFIG_PETLINK_UI_STAGE == 1
-  /* B1 点亮验证：硬件彩条，不起协议任务 */
   esp_lcd_panel_handle_t panel = disp_dsi_init();
   disp_dsi_color_bars(panel);
   ESP_LOGI(TAG, "STAGE=1 彩条模式——不跑协议；看屏确认后回 STAGE 2/3");
 #elif CONFIG_PETLINK_UI_STAGE == 2
-  /* B2 LVGL 静态页：不起协议任务 */
   esp_lcd_panel_handle_t panel = disp_dsi_init();
   pet_ui_mount(panel);
   ESP_LOGI(TAG, "STAGE=2 静态页模式——不跑协议；看屏确认后回 STAGE 3");
 #else
-  /* 正式模式：屏 + 协议（默认） */
   btn_init(&g_yes, (gpio_num_t)CONFIG_PETLINK_GPIO_YES);
   btn_init(&g_no, (gpio_num_t)CONFIG_PETLINK_GPIO_NO);
-  if (CONFIG_PETLINK_GPIO_VOICE >= 0) /* -1 = 无语音键的双键布局 */
+  if (CONFIG_PETLINK_GPIO_VOICE >= 0)
     btn_init(&g_voice, (gpio_num_t)CONFIG_PETLINK_GPIO_VOICE);
   esp_lcd_panel_handle_t panel = disp_dsi_init();
   pet_ui_mount(panel);
-  xTaskCreate(petlink_task, "petlink", 6144, NULL, 5, NULL); /* 6KB：petlink 协议 + 语音触发接线 */
+  xTaskCreate(petlink_task, "petlink", 6144, NULL, 5, NULL);
 #endif
 }

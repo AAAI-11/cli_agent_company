@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 宠物 UI：LVGL 任务 + 快照交接（ui_on_state 的唯一去向）。
  *
  * 任务模型（v0.2 定案 D1）：
@@ -18,17 +18,18 @@
 
 #include "petlink.h"
 
+/** 通风口：普通矢量狗无 agent 区分，agent 只影响 PNG 素材选择 */
 typedef struct {
   pl_status_t state;
   bool link_live;
-  char session[16]; /* 显示取前 10 字符（与虚拟设备 slice(0,10) 同口径） */
-  char text[100];   /* state 帧短标签（daemon 截 32 cps，最坏 96 UTF-8 字节）；
-                       空串=回退状态中文名（与 pet.js 同口径） */
-  pl_bubble_t bubbles[PL_MAX_BUBBLES]; /* F02R 多会话气泡（0 个=隐藏该行） */
+  char session[16];
+  char text[100];
+  char agent[PL_AGENT_LEN];    /* 管道标识（"codex-cli"/"claude-code"等），空=未知 */
+  pl_bubble_t bubbles[PL_MAX_BUBBLES];
   uint8_t bubble_n;
-  pl_tokens_t tokens; /* F15 焦点会话 token 快照（tokens_valid=0 时隐藏底行） */
+  pl_tokens_t tokens;
   bool tokens_valid;
-  uint32_t arrived_ms; /* pet_ui_push 内盖戳（esp_timer ms），供 <500ms 度量 */
+  uint32_t arrived_ms;
 } pet_ui_snap_t;
 
 /** 点亮后调用一次：建 LVGL 任务并接管 panel */

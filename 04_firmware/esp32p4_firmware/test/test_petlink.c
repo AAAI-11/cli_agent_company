@@ -1,4 +1,4 @@
-/**
+﻿/**
  * PetLink 设备端核心宿主机单元测试（不依赖 ESP-IDF）。
  * 跑法：sh test/run.sh
  * 覆盖：编码字节精确性、NDJSON 分帧容错、握手、防乒乓（!）、
@@ -20,7 +20,7 @@ static int total, passed, failed;
 /* ---------- 测试桩 ---------- */
 
 #define MAX_TX 64
-static char tx[MAX_TX][PL_MAX_LINE + 8]; /* 语音帧 ~2.5KB，桩缓冲按帧上限开 */
+static char tx[MAX_TX][PL_MAX_LINE + 8];
 static int tx_n;
 static uint32_t fake_uptime_val;
 
@@ -39,7 +39,7 @@ static void feed(pl_t *pl, const char *line_no_nl, uint32_t now) {
 }
 
 static pl_status_t last_st = PL_ST_CONNECTING;
-static char last_sess[32] = "", last_text[64] = "";
+static char last_sess[32] = "", last_agent[PL_AGENT_LEN] = "", last_text[64] = "";
 static pl_bubble_t last_bubbles[PL_MAX_BUBBLES];
 static uint8_t last_bubble_n;
 static pl_tokens_t last_tokens;
@@ -48,12 +48,14 @@ static int st_n;
 static char hello_ok_ver[32] = "";
 static int hello_ok_n;
 
-static void on_state(pl_status_t st, const char *session, const char *text,
+static void on_state(pl_status_t st, const char *session, const char *agent,
+                     const char *text,
                      const pl_bubble_t *bubbles, uint8_t bubble_n,
                      const pl_tokens_t *tokens, void *ctx) {
   (void)ctx;
   last_st = st;
   snprintf(last_sess, sizeof(last_sess), "%s", session ? session : "(null)");
+  snprintf(last_agent, sizeof(last_agent), "%s", agent ? agent : "(null)");
   snprintf(last_text, sizeof(last_text), "%s", text ? text : "(null)");
   last_bubble_n = bubble_n;
   if (bubbles && bubble_n) memcpy(last_bubbles, bubbles, bubble_n * sizeof(pl_bubble_t));
@@ -71,11 +73,10 @@ static void pl_setup(pl_t *pl, const char *id) {
   pl_cbs_t cbs = { on_send, on_state, on_hello_ok, on_uptime };
   pl_init(pl, &cbs, NULL, id, "0.1.0");
   reset_tx(); st_n = 0; hello_ok_n = 0; fake_uptime_val = 4242;
-  last_st = PL_ST_CONNECTING; last_sess[0] = last_text[0] = '\0';
+  last_st = PL_ST_CONNECTING; last_sess[0] = last_agent[0] = last_text[0] = '\0';
   last_bubble_n = 0; last_tokens_valid = false;
 }
 
-/** 已握手的会话：pl_start + 喂 hello_ok，返回后设备处于握手完成态 */
 static void handshake(pl_t *pl, uint32_t t) {
   pl_start(pl, t);
   reset_tx();
@@ -107,9 +108,9 @@ int main(void) {
     reset_tx(); st_n = 0;
     const char *a = "{\"ver\":1,\"type\":\"state\",\"session\":\"s1\",\"status\":\"working\",\"text\":\"E";
     const char *b = "dit(x)\"}\r\n{\"ver\":1,\"type\":\"state\",\"session\":\"s2\",\"status\":\"done\"}\n\n";
-    pl_feed(&pl, a, strlen(a), 100); /* 前半行，无换行 → 不触发 */
+    pl_feed(&pl, a, strlen(a), 100);
     CHECK(st_n == 0, "半行不触发回调");
-    pl_feed(&pl, b, strlen(b), 110); /* 后半行 + 第二行 + 空行 */
+    pl_feed(&pl, b, strlen(b), 110);
     CHECK(st_n == 2, "补齐半行 + 一包多行共 2 帧");
     CHECK(last_st == PL_ST_DONE && strcmp(last_sess, "s2") == 0, "最后一帧生效（done/s2）");
   }
@@ -124,7 +125,7 @@ int main(void) {
     CHECK(hello_ok_n == 1, "重复 hello_ok 不重复回调");
   }
 
-  printf("== 4. 防乒乓（daemon 侧事故的回归用例） ==\n");
+  printf("== 4. 防乒乓 ==\n");
   {
     pl_setup(&pl, "p4-abc123");
     handshake(&pl, 0);
@@ -159,6 +160,21 @@ int main(void) {
     CHECK(st_n == 0, "未知 status 前向兼容忽略");
   }
 
+  printf("== 5b. agent 字段透传 ==\n");
+  {
+    pl_setup(&pl, "p4-abc123");
+    handshake(&pl, 0);
+    st_n = 0;
+    feed(&pl, "{\"ver\":1,\"type\":\"state\",\"session\":\"s1\",\"status\":\"working\","
+              "\"agent\":\"codex-cli\"}", 100);
+    CHECK(st_n == 1 && strcmp(last_agent, "codex-cli") == 0, "agent=codex-cli 透传");
+    feed(&pl, "{\"ver\":1,\"type\":\"state\",\"session\":\"s2\",\"status\":\"thinking\","
+              "\"agent\":\"claude-code\"}", 110);
+    CHECK(st_n == 2 && strcmp(last_agent, "claude-code") == 0, "agent=claude-code 透传");
+    feed(&pl, "{\"ver\":1,\"type\":\"state\",\"session\":\"s3\",\"status\":\"done\"}", 120);
+    CHECK(st_n == 3 && strcmp(last_agent, "(null)") == 0, "未携带 agent 字段 → (null)");
+  }
+
   printf("== 6. 容错：坏 JSON / 日志噪声 / 版本不匹配 / 未知 type ==\n");
   {
     pl_setup(&pl, "p4-abc123");
@@ -176,7 +192,7 @@ int main(void) {
   printf("== 7. 轮询：握手重试 / 心跳周期 / 判活重握手 ==\n");
   {
     pl_setup(&pl, "p4-abc123");
-    pl_start(&pl, 0); /* t=0 发 hello，无人应答 */
+    pl_start(&pl, 0);
     reset_tx();
     pl_poll(&pl, 4000);  CHECK(tx_n == 0, "4s：未到重试点不重发");
     pl_poll(&pl, 5000);  CHECK(tx_n == 1 && strstr(tx[0], "\"hello\""), "5s：重发 hello");
@@ -185,47 +201,43 @@ int main(void) {
     pl_poll(&pl, 5200);  CHECK(tx_n == 0, "刚握手不立即补心跳");
     pl_poll(&pl, 10200); CHECK(tx_n == 1 && strstr(tx[0], "\"heartbeat\"") && !strstr(tx[0], "reply"),
                                "握手后 5s：发探测（不带 reply）");
-    /* 静默 91s → 判活超时 → 重握手 */
     feed(&pl, "{\"ver\":1,\"type\":\"heartbeat\",\"uptime_ms\":1,\"reply\":true}", 11000);
     reset_tx();
     pl_poll(&pl, 11000 + 91000);
     CHECK(tx_n == 1 && strstr(tx[0], "\"hello\""), "静默超 90s：降级重发 hello");
   }
 
-  printf("== 8. 行边界重新同步（超长垃圾行冲刷） ==\n");
+  printf("== 8. 行边界重新同步 ==\n");
   {
     pl_setup(&pl, "p4-abc123");
     handshake(&pl, 0);
     char junk[300];
     memset(junk, 'x', sizeof(junk) - 1); junk[sizeof(junk) - 1] = '\0';
-    for (int i = 0; i < 60; i++) pl_feed(&pl, junk, strlen(junk), 100); /* ~18KB 无 \n 超限 */
-    pl_feed(&pl, "\n", 1, 150);                                          /* 垃圾行冲刷 */
+    for (int i = 0; i < 60; i++) pl_feed(&pl, junk, strlen(junk), 100);
+    pl_feed(&pl, "\n", 1, 150);
     st_n = 0;
     feed(&pl, "{\"ver\":1,\"type\":\"state\",\"session\":\"s\",\"status\":\"done\"}", 200);
     CHECK(st_n == 1 && last_st == PL_ST_DONE, "垃圾行冲刷后链路立即恢复");
     CHECK(pl.len == 0, "缓冲不残留");
   }
 
-  printf("== 9. 语音音频帧（协议 §3.7） ==\n");
+  printf("== 9. 语音音频帧 ==\n");
   {
     pl_setup(&pl, "p4-abc123");
     handshake(&pl, 0);
     reset_tx();
 
-    /* 单帧字节精确：3 字节 PCM 的 b64 = AAEC（手算基准） */
     const uint8_t pcm1[3] = { 0x00, 0x01, 0x02 };
     pl_audio(&pl, "a1", 0, false, 16000, pcm1, sizeof pcm1);
     CHECK(tx_n == 1 && strcmp(tx[0],
       "{\"ver\":1,\"type\":\"audio\",\"id\":\"a1\",\"seq\":0,\"rate\":16000,"
       "\"end\":false,\"b64\":\"AAEC\"}") == 0, "audio 数据帧逐字节正确（b64=AAEC）");
 
-    /* 收尾帧 */
     pl_audio(&pl, "a1", 1, true, 16000, NULL, 0);
     CHECK(tx_n == 2 && strcmp(tx[1],
       "{\"ver\":1,\"type\":\"audio\",\"id\":\"a1\",\"seq\":1,\"end\":true}") == 0,
       "audio 收尾帧逐字节正确");
 
-    /* 整段分块：5000B → 1800+1800+1400 三块 + 收尾 = 4 帧 */
     reset_tx();
     static uint8_t big[5000];
     for (size_t i = 0; i < sizeof big; i++) big[i] = (uint8_t)(i * 7);
@@ -234,46 +246,40 @@ int main(void) {
     int all_in_limit = 1;
     for (int i = 0; i < 4; i++) if (strlen(tx[i]) >= PL_MAX_LINE) all_in_limit = 0;
     CHECK(all_in_limit, "每帧都在 4KB 帧限内");
-    /* 块大小：b64 长度 = 4*ceil(n/3)——1800→2400，1400→1868 */
     const char *b64_0 = strstr(tx[0], "\"b64\":\"") + 7;
     const char *b64_2 = strstr(tx[2], "\"b64\":\"") + 7;
     CHECK(b64_0 - tx[0] > 0 && strcspn(b64_0, "\"") == 2400, "第 1 块 b64=2400 字符（1800B）");
     CHECK(b64_2 - tx[2] > 0 && strcspn(b64_2, "\"") == 1868, "第 3 块 b64=1868 字符（1400B）");
     CHECK(strstr(tx[2], "\"seq\":2") != NULL && strstr(tx[3], "\"seq\":3") != NULL &&
           strstr(tx[3], "\"end\":true") != NULL, "seq 连续且收尾帧带 end:true");
-    /* 边界防御：n=0 且非 end（非法调用）静默丢弃不崩 */
     reset_tx();
     pl_audio(&pl, "a3", 0, false, 16000, NULL, 0);
     CHECK(tx_n == 0, "n=0 非 end 的非法调用静默忽略");
   }
 
-  printf("== 10. F02R 多会话气泡（协议 §3.4 可选 bubbles） ==\n");
+  printf("== 10. F02R 多会话气泡 ==\n");
   {
     pl_setup(&pl, "p4-abc123");
     handshake(&pl, 0);
 
-    /* 完整解析：三项，中间项是焦点 */
     feed(&pl, "{\"ver\":1,\"type\":\"state\",\"session\":\"aaa\",\"status\":\"working\","
               "\"bubbles\":[{\"s\":\"aaa\",\"st\":\"working\",\"f\":1},"
               "{\"s\":\"bbb\",\"st\":\"waiting_confirm\",\"f\":0},"
               "{\"s\":\"ccc\",\"st\":\"thinking\"}]}", 100);
     CHECK(st_n == 1 && last_bubble_n == 3, "bubbles 三项全解析");
     CHECK(last_bubbles[0].st == PL_ST_WORKING && last_bubbles[0].focus,
-          "焦点项 st/f 正确（缺省 f 视为 false）");
+          "焦点项 st/f 正确");
     CHECK(last_bubbles[1].st == PL_ST_WAITING_CONFIRM && !last_bubbles[1].focus,
           "非焦点项 st/f 正确");
 
-    /* 帧不携带 bubbles → 清空（旧 daemon / 回退路径） */
     feed(&pl, "{\"ver\":1,\"type\":\"state\",\"session\":\"aaa\",\"status\":\"thinking\"}", 110);
     CHECK(st_n == 2 && last_bubble_n == 0, "未携带 bubbles → bubble_n=0");
 
-    /* 坏项跳过不拖垮整帧：未知 st / 非对象项 */
     feed(&pl, "{\"ver\":1,\"type\":\"state\",\"session\":\"aaa\",\"status\":\"done\","
               "\"bubbles\":[{\"st\":\"hologram\"},7,{\"st\":\"error\",\"f\":1}]}", 120);
     CHECK(st_n == 3 && last_bubble_n == 1 && last_bubbles[0].st == PL_ST_ERROR,
           "未知 st/非对象项跳过，好项保留");
 
-    /* 超 6 项截断 */
     char big[512];
     snprintf(big, sizeof(big), "{\"ver\":1,\"type\":\"state\",\"session\":\"m\",\"status\":\"working\","
              "\"bubbles\":[{\"st\":\"done\"},{\"st\":\"done\"},{\"st\":\"done\"},"
@@ -282,28 +288,24 @@ int main(void) {
     CHECK(st_n == 4 && last_bubble_n == PL_MAX_BUBBLES, "超上限截断到 6");
   }
 
-  printf("== 11. F15 token 消耗（协议 §3.4 可选 tokens） ==\n");
+  printf("== 11. F15 token 消耗 ==\n");
   {
     pl_setup(&pl, "p4-abc123");
     handshake(&pl, 0);
 
-    /* 携带 tokens：两数全解析 */
     feed(&pl, "{\"ver\":1,\"type\":\"state\",\"session\":\"aaa\",\"status\":\"working\","
               "\"tokens\":{\"ctx\":45123,\"tot\":1234567}}", 100);
     CHECK(st_n == 1 && last_tokens_valid
               && last_tokens.ctx == 45123 && last_tokens.tot == 1234567,
           "tokens ctx/tot 解析");
 
-    /* 未携带 → 无效（UI 隐藏，不用半截数字） */
     feed(&pl, "{\"ver\":1,\"type\":\"state\",\"session\":\"aaa\",\"status\":\"thinking\"}", 110);
     CHECK(st_n == 2 && !last_tokens_valid, "未携带 tokens → 无效");
 
-    /* 字段非法（字符串/缺 ctx）：整体无效，不出现半截快照 */
     feed(&pl, "{\"ver\":1,\"type\":\"state\",\"session\":\"aaa\",\"status\":\"done\","
               "\"tokens\":{\"ctx\":\"many\",\"tot\":5}}", 120);
     CHECK(st_n == 3 && !last_tokens_valid, "非法 tokens → 整体无效");
 
-    /* 恢复正常后再次生效（无效态不粘住） */
     feed(&pl, "{\"ver\":1,\"type\":\"state\",\"session\":\"aaa\",\"status\":\"error\","
               "\"tokens\":{\"ctx\":715,\"tot\":1935}}", 130);
     CHECK(st_n == 4 && last_tokens_valid && last_tokens.ctx == 715 && last_tokens.tot == 1935,

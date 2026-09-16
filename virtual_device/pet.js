@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 /**
  * 虚拟设备：PetLink v1 over WebSocket（帧语义 = NDJSON 一行，见 docs/protocol.md §4）
  * 240×320 逻辑分辨率（与实体 2.8" 屏一致的竖屏心智），CSS 放大显示。
@@ -14,24 +14,28 @@ const STATE_STYLE = {
   error:           { color: '#f7768e', zh: '出错了' },
 };
 
+const AGENT_STYLE = {
+  codex:  { label: 'CX', color: '#7aa2f7' },
+  claude: { label: 'CC', color: '#9ece6a' },
+};
+const AGENT_DEFAULT = { label: '', color: '#565f89' };
+
 const ui = {
   status: 'thinking',
   text: '正在连接 daemon…',
   session: '',
-  bubbles: [], // F02R 多会话气泡：[{s,st,f}]，未知状态过滤、最多 6 个
-  tokens: null, // F15 焦点会话 token 快照 {ctx,tot}；null=隐藏底行
+  agent: '',              // daemon 侧管道标识（"codex-cli"/"claude-code"）
+  bubbles: [],
+  tokens: null,
   connected: false,
 };
 
-/* ---------- 形象素材槽 ----------
- * assets/<state>.png 存在即整只替换该状态的宠物（表情画进图里），
- * 缺失则回退到下方矢量小狗。可以一次只换一张。
- * 约定见 assets/README.md —— 与未来固件的 flash 素材同思路，产出可直接迁移。 */
-const IMG_SIZE = 176; // 画布中央正方形显示区
+/* ---------- 形象素材槽 ---------- */
+const IMG_SIZE = 176;
 const stateImgs = {};
 for (const s of Object.keys(STATE_STYLE)) {
   const img = new Image();
-  img.onload = () => { stateImgs[s] = img; }; // 404 时静默回退矢量版
+  img.onload = () => { stateImgs[s] = img; };
   img.src = `assets/${s}.png`;
 }
 
@@ -68,21 +72,21 @@ function connect() {
         ui.status = STATE_STYLE[m.status] ? m.status : 'thinking';
         ui.text = m.text || STATE_STYLE[ui.status].zh;
         ui.session = m.session || '';
+        ui.agent = m.agent || '';
         ui.bubbles = Array.isArray(m.bubbles)
           ? m.bubbles.filter((b) => b && STATE_STYLE[b.st]).slice(0, 6)
           : [];
-        // F15：帧带合法 tokens 才显示（半截/非法一律 null=隐藏，与固件同口径）
         const t = m.tokens;
         ui.tokens = t && Number.isFinite(t.ctx) && Number.isFinite(t.tot)
           && t.ctx >= 0 && t.tot >= 0 ? { ctx: t.ctx, tot: t.tot } : null;
         break;
       case 'heartbeat':
-        if (!m.reply) { // 防乒乓：应答带 reply:true，收到应答不再回（协议 §3.3）
+        if (!m.reply) {
           send({ ver: 1, type: 'heartbeat', uptime_ms: performance.now() | 0, reply: true });
         }
         break;
       default:
-        break; // 前向兼容：未知消息忽略
+        break;
     }
   };
 
@@ -104,10 +108,9 @@ function setConn(on, msg) {
   document.getElementById('foot').textContent = on ? `daemon 已连接 · ${WS_PORT} · ${DEV_ID}` : (msg || '未连接');
 }
 
-/* 心跳：保活 daemon 侧 lastSeen */
 setInterval(() => send({ ver: 1, type: 'heartbeat', uptime_ms: performance.now() | 0 }), 5000);
 
-/* ---------- YES 键：任意按=allow（v0.8 三键改版：长按拒绝废除） ---------- */
+/* ---------- YES 键 ---------- */
 
 (() => {
   const btn = document.getElementById('yes');
@@ -120,7 +123,7 @@ setInterval(() => send({ ver: 1, type: 'heartbeat', uptime_ms: performance.now()
   window.__yesFlash = () => ({ flashT });
 })();
 
-/* ---------- NO 键：按下即发（有授权挂起=拒，空闲=切换焦点会话） ---------- */
+/* ---------- NO 键 ---------- */
 
 (() => {
   const btn = document.getElementById('no');
@@ -136,6 +139,13 @@ const cvs = document.getElementById('screen');
 const ctx = cvs.getContext('2d');
 const W = 240, H = 320;
 
+function agentStyle(a) {
+  if (!a) return AGENT_DEFAULT;
+  if (a.startsWith('codex')) return AGENT_STYLE.codex;
+  if (a === 'claude-code' || a === 'claude') return AGENT_STYLE.claude;
+  return AGENT_DEFAULT;
+}
+
 function draw(t) {
   const st = STATE_STYLE[ui.status];
   const cx = W / 2, cy = 150;
@@ -143,33 +153,46 @@ function draw(t) {
   ctx.fillStyle = '#0d0f17';
   ctx.fillRect(0, 0, W, H);
 
-  // 状态光晕
   const grad = ctx.createRadialGradient(cx, cy, 10, cx, cy, 130);
   grad.addColorStop(0, st.color + '2e');
   grad.addColorStop(1, 'transparent');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
 
-  // 顶栏状态条
   ctx.fillStyle = st.color;
   ctx.fillRect(0, 0, W, 4);
   ctx.font = '10px ui-monospace, monospace';
   ctx.fillStyle = '#565f89';
   ctx.textAlign = 'left';
   ctx.fillText('PETLINK/1', 10, 22);
+
+  // Agent 徽标：标题右侧小色块 + 标签
+  const as = agentStyle(ui.agent);
+  if (as.label) {
+    ctx.font = '700 9px ui-monospace, monospace';
+    const tw = ctx.measureText(as.label).width + 10;
+    ctx.fillStyle = as.color;
+    roundRect(92, 10, tw, 14, 3); ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.fillText(as.label, 92 + tw / 2, 21);
+    ctx.textAlign = 'left';
+  }
+
+  ctx.font = '10px ui-monospace, monospace';
+  ctx.fillStyle = '#565f89';
   ctx.textAlign = 'right';
   ctx.fillText(ui.session ? `# ${ui.session.slice(0, 10)}` : '# --', W - 10, 22);
 
-  // F02R 多会话气泡：session 标签下方右对齐一行，状态色圆点、焦点加大加白环
   const n = ui.bubbles.length;
   for (let i = 0; i < n; i++) {
     const b = ui.bubbles[i];
     const foc = !!b.f;
     const r = foc ? 7 : 5;
-    const cx = W - 10 - 8 - (n - 1 - i) * 17;
-    const cy = 38;
+    const bcx = W - 10 - 8 - (n - 1 - i) * 17;
+    const bcy = 38;
     ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.arc(bcx, bcy, r, 0, Math.PI * 2);
     ctx.fillStyle = STATE_STYLE[b.st].color;
     ctx.fill();
     if (foc) {
@@ -179,8 +202,6 @@ function draw(t) {
     }
   }
 
-  // F15 token 行：标题下方常驻小字（与固件同款缩写 45123→45.1k；位置同固件：
-  // 顶栏标题下方、与气泡行同高——底部留给状态胶囊/text，别叠）
   if (ui.tokens) {
     const fmt = (v) => (v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}k` : String(v));
     ctx.font = '10px ui-monospace, monospace';
@@ -189,7 +210,6 @@ function draw(t) {
     ctx.fillText(`ctx ${fmt(ui.tokens.ctx)} / tot ${fmt(ui.tokens.tot)}`, 10, 42);
   }
 
-  // 宠物（按状态附加动效）
   const s = ui.status;
   let bob = Math.sin(t / 450) * 4;
   let shake = 0;
@@ -206,11 +226,9 @@ function draw(t) {
   }
   ctx.restore();
 
-  // 状态徽标 + 短标签
   chip(t, st);
   extras(t, s, st.color, cx, cy);
 
-  // 底部按键回显
   const f = window.__yesFlash();
   const dt = performance.now() - f.flashT;
   if (dt < 500) {
@@ -236,7 +254,6 @@ function draw(t) {
 
 function drawDog(t, s, color) {
   const r = 52;
-  // 耳朵
   ctx.fillStyle = '#e2e6f3';
   ear(-r * 0.72, -r * 0.55, -0.5);
   ear(r * 0.72, -r * 0.55, 0.5);
@@ -249,37 +266,34 @@ function drawDog(t, s, color) {
     ctx.fill();
     ctx.restore();
   }
-  // 头
   ctx.fillStyle = '#f3f6fc';
   ctx.beginPath();
   ctx.arc(0, 0, r, 0, Math.PI * 2);
   ctx.fill();
-  // 腮红
   ctx.fillStyle = '#f5b6c2';
   ctx.beginPath(); ctx.ellipse(-28, 14, 9, 6, 0, 0, Math.PI * 2); ctx.fill();
   ctx.beginPath(); ctx.ellipse(28, 14, 9, 6, 0, 0, Math.PI * 2); ctx.fill();
 
-  // 表情（按状态）
   ctx.strokeStyle = '#3b4261';
   ctx.fillStyle = '#3b4261';
   ctx.lineWidth = 3.5;
   ctx.lineCap = 'round';
   const eyeY = -8;
-  if (s === 'done') { // ^ ^
+  if (s === 'done') {
     happyEye(-18, eyeY); happyEye(18, eyeY);
     ctx.beginPath(); ctx.arc(0, 8, 10, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke();
-  } else if (s === 'thinking') { // 眼睛上看 + 小嘴
+  } else if (s === 'thinking') {
     dot(-18, eyeY - 4); dot(18, eyeY - 4);
     ctx.beginPath(); ctx.arc(0, 10, 5, 0.1 * Math.PI, 0.9 * Math.PI); ctx.stroke();
-  } else if (s === 'working') { // 目光坚定 + 直嘴
+  } else if (s === 'working') {
     ctx.beginPath(); ctx.moveTo(-25, eyeY - 6); ctx.lineTo(-11, eyeY - 2); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(25, eyeY - 6); ctx.lineTo(11, eyeY - 2); ctx.stroke();
     dot(-18, eyeY + 2); dot(18, eyeY + 2);
     ctx.beginPath(); ctx.moveTo(-7, 12); ctx.lineTo(7, 12); ctx.stroke();
-  } else if (s === 'waiting_confirm') { // 圆眼看镜头 + O 嘴
+  } else if (s === 'waiting_confirm') {
     dot(-18, eyeY); dot(18, eyeY);
     ctx.beginPath(); ctx.arc(0, 10, 6, 0, Math.PI * 2); ctx.stroke();
-  } else if (s === 'error') { // > < + 波浪嘴 + 汗滴
+  } else if (s === 'error') {
     xEye(-18, eyeY); xEye(18, eyeY);
     ctx.beginPath();
     for (let i = 0; i <= 8; i++) ctx.lineTo(-14 + i * 3.5, 12 + (i % 2 ? 3 : -3));
@@ -314,7 +328,6 @@ function chip(t, st) {
   ctx.textAlign = 'center';
   ctx.fillText(label, W / 2, y + 17);
 
-  // 短标签
   ctx.font = '11px "PingFang SC", sans-serif';
   ctx.fillStyle = '#9aa5ce';
   ctx.fillText((ui.text || '').slice(0, 16), W / 2, y + 44);
@@ -322,13 +335,13 @@ function chip(t, st) {
 
 function extras(t, s, color, cx, cy) {
   ctx.fillStyle = color;
-  if (s === 'thinking') { // 头顶 "..." 循环
+  if (s === 'thinking') {
     const n = 1 + (Math.floor(t / 350) % 3);
     for (let i = 0; i < n; i++) {
       ctx.beginPath(); ctx.arc(cx - 14 + i * 14, cy - 78, 4, 0, Math.PI * 2); ctx.fill();
     }
   }
-  if (s === 'working') { // 旋转进度弧
+  if (s === 'working') {
     ctx.strokeStyle = color;
     ctx.lineWidth = 4;
     ctx.beginPath();
@@ -338,7 +351,7 @@ function extras(t, s, color, cx, cy) {
     ctx.arc(cx, cy, 84, t / 300 + Math.PI, t / 300 + Math.PI + 1.1);
     ctx.stroke();
   }
-  if (s === 'waiting_confirm') { // 感叹号脉冲
+  if (s === 'waiting_confirm') {
     const k = 1 + Math.sin(t / 160) * 0.15;
     ctx.save();
     ctx.translate(cx + 60, cy - 66);
@@ -351,7 +364,7 @@ function extras(t, s, color, cx, cy) {
     ctx.fillText('!', 0, 6);
     ctx.restore();
   }
-  if (s === 'done') { // 星光
+  if (s === 'done') {
     for (let i = 0; i < 5; i++) {
       const a = t / 500 + i * (Math.PI * 2 / 5);
       const r2 = 86 + Math.sin(t / 260 + i) * 6;
@@ -381,8 +394,6 @@ function roundRect(x, y, w, h, r) {
   ctx.arcTo(x, y, x + w, y, r);
   ctx.closePath();
 }
-
-/* ---------- 启动 ---------- */
 
 setConn(false, '正在连接 daemon…');
 connect();
