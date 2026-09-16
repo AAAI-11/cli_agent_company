@@ -29,8 +29,6 @@ static const char *TAG = "pet_assets";
 
 #define PNG_DISPLAY 176
 
-/* 每 agent 目录最多 5 张图（thinking/working/waiting_confirm/done/error）；
- * 当前最多跟踪 3 个 agent（默认 + codex + claude），暂不动态扩容 */
 #define MAX_AGENT_DIRS 6
 #define STATES_PER_DIR 5
 
@@ -39,11 +37,10 @@ static const pl_status_t k_status_order[STATES_PER_DIR] = {
 };
 
 static lv_obj_t *s_img;
-static bool s_has[MAX_AGENT_DIRS][STATES_PER_DIR]; /* has[dirIdx][stIdx] */
-static char s_agents[MAX_AGENT_DIRS][16];           /* 目录名 */
-static int s_dir_n;                                 /* 实际 agent 目录数 */
+static bool s_has[MAX_AGENT_DIRS][STATES_PER_DIR];
+static char s_agents[MAX_AGENT_DIRS][16];
+static int s_dir_n;
 
-/** agent 标识 → 目录名，空/未知 → "default" */
 static const char *agent_dir(const char *agent)
 {
   if (!agent || !agent[0]) return "default";
@@ -52,7 +49,6 @@ static const char *agent_dir(const char *agent)
   return "default";
 }
 
-/** 查找或注册一个 agent 目录索引 */
 static int dir_idx(const char *agent)
 {
   const char *dir = agent_dir(agent);
@@ -64,7 +60,6 @@ static int dir_idx(const char *agent)
   return s_dir_n++;
 }
 
-/** 检查并预解码指定 agent 目录的全部 PNG */
 static void scan_agent_dir(int di)
 {
   for (int si = 0; si < STATES_PER_DIR; si++) {
@@ -102,7 +97,6 @@ void pet_assets_init(lv_obj_t *parent)
   s_dir_n = 0;
   memset(s_has, 0, sizeof(s_has));
 
-  /* 探测已知目录 */
   static const char *known[] = { "default", "codex", "claude" };
   for (int k = 0; k < (int)(sizeof(known) / sizeof(known[0])); k++) {
     char d[64];
@@ -128,19 +122,22 @@ void pet_assets_init(lv_obj_t *parent)
 bool pet_assets_has(pl_status_t st)
 {
   (void)st;
-  return true; /* 具体 agent 看在 pet_assets_show 里，这里仅作为"该态可能有图"的乐观回答 */
+  for (int di = 0; di < s_dir_n; di++) {
+    for (int si = 0; si < STATES_PER_DIR; si++) {
+      if (s_has[di][si]) return true;
+    }
+  }
+  return false;
 }
 
-void pet_assets_show(pl_status_t st, bool on, const char *agent)
+bool pet_assets_show(pl_status_t st, bool on, const char *agent)
 {
-  if (!s_img) return;
-  if (!on) { lv_obj_add_flag(s_img, LV_OBJ_FLAG_HIDDEN); return; }
+  if (!s_img) return false;
+  if (!on) { lv_obj_add_flag(s_img, LV_OBJ_FLAG_HIDDEN); return false; }
 
-  /* 确定 agent 目录 */
   int di = dir_idx(agent);
-  if (di < 0) { lv_obj_add_flag(s_img, LV_OBJ_FLAG_HIDDEN); return; }
+  if (di < 0) { lv_obj_add_flag(s_img, LV_OBJ_FLAG_HIDDEN); return false; }
 
-  /* 状态 → 状态索引 */
   int si = -1;
   for (int i = 0; i < STATES_PER_DIR; i++) {
     if (k_status_order[i] == st || (st == PL_ST_CONNECTING && k_status_order[i] == PL_ST_THINKING)) {
@@ -148,8 +145,9 @@ void pet_assets_show(pl_status_t st, bool on, const char *agent)
       break;
     }
   }
+
+  /* 没有当前态的直接对应图或 CONNECTING 回退 thinking */
   if (si < 0 || !s_has[di][si]) {
-    /* CONNECTING 或没有对应图：回退到 thinking */
     if (st == PL_ST_CONNECTING) {
       int think_si = -1;
       for (int i = 0; i < STATES_PER_DIR; i++) {
@@ -160,17 +158,18 @@ void pet_assets_show(pl_status_t st, bool on, const char *agent)
         snprintf(lvpath, sizeof(lvpath), "A:/%s/thinking.png", s_agents[di]);
         lv_image_set_src(s_img, lvpath);
         lv_obj_clear_flag(s_img, LV_OBJ_FLAG_HIDDEN);
-        return;
+        return true;
       }
     }
     lv_obj_add_flag(s_img, LV_OBJ_FLAG_HIDDEN);
-    return;
+    return false;
   }
 
   char lvpath[64];
   snprintf(lvpath, sizeof(lvpath), "A:/%s/%s.png", s_agents[di], pl_status_name(st));
   lv_image_set_src(s_img, lvpath);
   lv_obj_clear_flag(s_img, LV_OBJ_FLAG_HIDDEN);
+  return true;
 }
 
 void pet_assets_move(int cx, int cy)

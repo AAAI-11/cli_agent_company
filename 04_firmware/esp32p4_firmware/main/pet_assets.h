@@ -25,10 +25,13 @@
 
 /** 挂载 asset 分区 + 建隐藏 lv_image */
 void pet_assets_init(lv_obj_t *parent);
-/** 该态 PNG 是否就位 */
+/** 该态 PNG 是否就位（乐观回答：只要任意 agent/dir 有图就 true） */
 bool pet_assets_has(pl_status_t st);
-/** 切换显示：按 agent 选择目录下的 PNG，否则隐藏 */
-void pet_assets_show(pl_status_t st, bool on, const char *agent);
+/**
+ * 按 agent 选择目录切换 PNG。
+ * @returns true=实际显示了 PNG，false=没显示（调用方应回退矢量狗）
+ */
+bool pet_assets_show(pl_status_t st, bool on, const char *agent);
 /** anim_step 每拍同步宠物中心 */
 void pet_assets_move(int cx, int cy);
 
@@ -36,7 +39,7 @@ void pet_assets_move(int cx, int cy);
 
 static inline void pet_assets_init(lv_obj_t *parent) { (void)parent; }
 static inline bool pet_assets_has(pl_status_t st) { (void)st; return false; }
-static inline void pet_assets_show(pl_status_t st, bool on, const char *agent) { (void)st; (void)on; (void)agent; }
+static inline bool pet_assets_show(pl_status_t st, bool on, const char *agent) { (void)st; (void)on; (void)agent; return false; }
 static inline void pet_assets_move(int cx, int cy) { (void)cx; (void)cy; }
 
 #endif

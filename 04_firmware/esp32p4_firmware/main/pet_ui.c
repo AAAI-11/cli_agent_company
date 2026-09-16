@@ -438,8 +438,8 @@ static void apply_state(pl_status_t st, const pet_ui_snap_t *snap)
   lv_label_set_text(s_lbl_state, sty->label);
 
   /* 素材按 agent 选目录；只有该 agent 有对应 PNG 才替换矢量狗 */
-  bool use_png = pet_assets_has(st);
-  pet_assets_show(st, use_png, snap->agent);
+  bool use_png = pet_assets_show(st, true, snap->agent);
+
   set_vis(s_dog, !use_png);
   for (int i = 0; i < 2; i++)
     lv_obj_set_style_arc_color(s_arc_work[i], c, LV_PART_INDICATOR);
