@@ -7,17 +7,27 @@ var os = require("os");
 var HOME = os.homedir();
 var ROOT = path.join(HOME, ".codex", "sessions");
 
+/*
+ * JSONL 事件 → PetLink 五态映射。
+ * agent_message 有意不在此表：它代表"agent 完成了本轮回答"，但此时
+ * 整个任务可能还在进行（多轮工具调用之间 agent 会反复输出中间摘要）。
+ * 只有 task_complete 才是"整个任务彻底结束"的真实信号——2026-09-16
+ * 真机：agent 写一行代码就跑一个 function_call→agent_message 交替，
+ * 整个循环几十次，每次 agent_message 都翻 done 并触发语音"已完成"。
+ */
 var MAP = {
   agent_reasoning: "thinking",
   user_message: "thinking",
   task_started: "thinking",
   function_call: "working",
   function_call_output: "working",
-  agent_message: "done",
   task_complete: "done",
 };
 
-var TERMINAL = { agent_message: 1, task_complete: 1 };
+/* 真正代表"任务结束"的 terminal 事件——只有 task_complete 一个。
+ * agent_message 不在此列，所以 DONE_IDLE_MS 兜底也不会从 agent_message
+ * 出发去做 idle→done 跳转。 */
+var TERMINAL = { task_complete: 1 };
 var DONE_IDLE_MS = 4000;
 var SESSION_PREFIX = "codex";
 
