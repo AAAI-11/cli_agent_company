@@ -1,12 +1,12 @@
 ﻿/**
- * 五态 PNG 素材槽实现——支持按 agent 分目录。
+ * 五态 PNG 素材槽实现——平铺文件名（fatfsgen.py 不支持子目录）。
  *
- * 约定：
- *   A:/<agent>/<status>.png  例如 A:/codex/thinking.png, A:/claude/working.png
- *   "codex-cli" 或 "codex:" 前缀 → 目录 "codex"
- *   "claude-code" 或 "claude" → 目录 "claude"
- *   空/未知 agent → 目录 "default"
- *   CONNECTING 复用同目录下的 thinking.png
+ * 文件名约定：
+ *   A:/{agent}_{status}.png  例如 A:/codex_thinking.png, A:/claude_working.png
+ *   "codex-cli"/"codex:" 前缀 → "codex"
+ *   "claude-code"/"claude" → "claude"
+ *   空/未知 agent → "default"
+ *   CONNECTING 复用同 agent 的 _thinking.png
  *
  * 缺失/失败全程矢量兜底（pet_ui 内建）。
  */
@@ -27,58 +27,38 @@
 
 static const char *TAG = "pet_assets";
 
-#define PNG_DISPLAY 176
-
-#define MAX_AGENT_DIRS 6
-#define STATES_PER_DIR 5
-
-static const pl_status_t k_status_order[STATES_PER_DIR] = {
-  PL_ST_THINKING, PL_ST_WORKING, PL_ST_WAITING_CONFIRM, PL_ST_DONE, PL_ST_ERROR,
-};
+#define PNG_DISPLAY 280
+#define PNG_NATURAL 352
+#define PNG_HALF    (PNG_NATURAL / 2)
+#define MAX_AGENTS  6
 
 static lv_obj_t *s_img;
-static bool s_has[MAX_AGENT_DIRS][STATES_PER_DIR];
-static char s_agents[MAX_AGENT_DIRS][16];
-static int s_dir_n;
 
-static const char *agent_dir(const char *agent)
+/* 预制解码的已知 agent 列表 */
+static const char *k_agents[] = { "default", "codex", "claude" };
+#define N_AGENTS (sizeof(k_agents) / sizeof(k_agents[0]))
+
+/* has[agent][status]: 0/1 */
+static bool s_has[3][5];
+
+static const char *status_name(pl_status_t st)
 {
-  if (!agent || !agent[0]) return "default";
-  if (strncmp(agent, "codex", 5) == 0) return "codex";
-  if (strcmp(agent, "claude-code") == 0 || strcmp(agent, "claude") == 0) return "claude";
-  return "default";
+  switch (st) {
+    case PL_ST_THINKING:         return "thinking";
+    case PL_ST_WORKING:          return "working";
+    case PL_ST_WAITING_CONFIRM:  return "waiting_confirm";
+    case PL_ST_DONE:             return "done";
+    case PL_ST_ERROR:            return "error";
+    default:                     return "thinking";
+  }
 }
 
-static int dir_idx(const char *agent)
+static int agent_index(const char *agent)
 {
-  const char *dir = agent_dir(agent);
-  for (int i = 0; i < s_dir_n; i++) {
-    if (strcmp(s_agents[i], dir) == 0) return i;
-  }
-  if (s_dir_n >= MAX_AGENT_DIRS) return -1;
-  snprintf(s_agents[s_dir_n], sizeof(s_agents[s_dir_n]), "%s", dir);
-  return s_dir_n++;
-}
-
-static void scan_agent_dir(int di)
-{
-  for (int si = 0; si < STATES_PER_DIR; si++) {
-    s_has[di][si] = false;
-    pl_status_t st = k_status_order[si];
-    const char *name = pl_status_name(st);
-    char abspath[64];
-    snprintf(abspath, sizeof(abspath), "/asset/%s/%s.png", s_agents[di], name);
-    struct stat sb;
-    if (stat(abspath, &sb) != 0 || sb.st_size <= 0) continue;
-
-    char lvpath[64];
-    snprintf(lvpath, sizeof(lvpath), "A:/%s/%s.png", s_agents[di], name);
-    lv_image_decoder_dsc_t dsc;
-    if (lv_image_decoder_open(&dsc, lvpath, NULL) == LV_RESULT_OK) {
-      lv_image_decoder_close(&dsc);
-      s_has[di][si] = true;
-    }
-  }
+  if (!agent || !agent[0]) return 0;
+  if (strncmp(agent, "codex", 5) == 0) return 1;
+  if (strcmp(agent, "claude-code") == 0 || strcmp(agent, "claude") == 0) return 2;
+  return 0;
 }
 
 void pet_assets_init(lv_obj_t *parent)
@@ -94,39 +74,46 @@ void pet_assets_init(lv_obj_t *parent)
     return;
   }
 
-  s_dir_n = 0;
   memset(s_has, 0, sizeof(s_has));
 
-  static const char *known[] = { "default", "codex", "claude" };
-  for (int k = 0; k < (int)(sizeof(known) / sizeof(known[0])); k++) {
-    char d[64];
-    snprintf(d, sizeof(d), "/asset/%s", known[k]);
-    struct stat sb;
-    if (stat(d, &sb) == 0 && S_ISDIR(sb.st_mode)) {
-      int di = dir_idx(known[k]);
-      if (di >= 0) scan_agent_dir(di);
+  /* 扫描所有 (agent, status) 组合 */
+  static const pl_status_t states[] = {
+    PL_ST_THINKING, PL_ST_WORKING, PL_ST_WAITING_CONFIRM, PL_ST_DONE, PL_ST_ERROR
+  };
+  int total = 0;
+  for (int ai = 0; ai < (int)N_AGENTS; ai++) {
+    for (int si = 0; si < 5; si++) {
+      char abspath[64];
+      snprintf(abspath, sizeof(abspath), "/asset/%s_%s.png",
+               k_agents[ai], status_name(states[si]));
+      struct stat sb;
+      if (stat(abspath, &sb) != 0 || sb.st_size <= 0) continue;
+
+      char lvpath[64];
+      snprintf(lvpath, sizeof(lvpath), "A:/%s_%s.png",
+               k_agents[ai], status_name(states[si]));
+      lv_image_decoder_dsc_t dsc;
+      if (lv_image_decoder_open(&dsc, lvpath, NULL) == LV_RESULT_OK) {
+        lv_image_decoder_close(&dsc);
+        s_has[ai][si] = true;
+        total++;
+      }
     }
   }
 
   s_img = lv_image_create(parent);
-  lv_image_set_scale(s_img, 256 * PNG_DISPLAY / 352);
+  lv_obj_set_size(s_img, PNG_DISPLAY, PNG_DISPLAY);
   lv_obj_add_flag(s_img, LV_OBJ_FLAG_HIDDEN);
 
-  int total = 0;
-  for (int di = 0; di < s_dir_n; di++)
-    for (int si = 0; si < STATES_PER_DIR; si++)
-      if (s_has[di][si]) total++;
-  ESP_LOGI(TAG, "asset 挂载完成：%d agent 目录 %d 张 PNG 就绪", s_dir_n, total);
+  ESP_LOGI(TAG, "asset 挂载完成：%d 张 PNG 就绪（%d agent）", total, (int)N_AGENTS);
 }
 
 bool pet_assets_has(pl_status_t st)
 {
   (void)st;
-  for (int di = 0; di < s_dir_n; di++) {
-    for (int si = 0; si < STATES_PER_DIR; si++) {
-      if (s_has[di][si]) return true;
-    }
-  }
+  for (int ai = 0; ai < (int)N_AGENTS; ai++)
+    for (int si = 0; si < 5; si++)
+      if (s_has[ai][si]) return true;
   return false;
 }
 
@@ -135,38 +122,33 @@ bool pet_assets_show(pl_status_t st, bool on, const char *agent)
   if (!s_img) return false;
   if (!on) { lv_obj_add_flag(s_img, LV_OBJ_FLAG_HIDDEN); return false; }
 
-  int di = dir_idx(agent);
-  if (di < 0) { lv_obj_add_flag(s_img, LV_OBJ_FLAG_HIDDEN); return false; }
-
-  int si = -1;
-  for (int i = 0; i < STATES_PER_DIR; i++) {
-    if (k_status_order[i] == st || (st == PL_ST_CONNECTING && k_status_order[i] == PL_ST_THINKING)) {
-      si = i;
+  int ai = agent_index(agent);
+  int st_idx = -1;
+  static const pl_status_t states[] = {
+    PL_ST_THINKING, PL_ST_WORKING, PL_ST_WAITING_CONFIRM, PL_ST_DONE, PL_ST_ERROR
+  };
+  for (int i = 0; i < 5; i++) {
+    if (states[i] == st || (st == PL_ST_CONNECTING && states[i] == PL_ST_THINKING)) {
+      st_idx = i;
       break;
     }
   }
 
-  /* 没有当前态的直接对应图或 CONNECTING 回退 thinking */
-  if (si < 0 || !s_has[di][si]) {
-    if (st == PL_ST_CONNECTING) {
-      int think_si = -1;
-      for (int i = 0; i < STATES_PER_DIR; i++) {
-        if (k_status_order[i] == PL_ST_THINKING) { think_si = i; break; }
-      }
-      if (think_si >= 0 && s_has[di][think_si]) {
-        char lvpath[64];
-        snprintf(lvpath, sizeof(lvpath), "A:/%s/thinking.png", s_agents[di]);
-        lv_image_set_src(s_img, lvpath);
-        lv_obj_clear_flag(s_img, LV_OBJ_FLAG_HIDDEN);
-        return true;
-      }
+  if (st_idx < 0 || !s_has[ai][st_idx]) {
+    /* CONNECTING 回退 thinking */
+    if (st == PL_ST_CONNECTING && s_has[ai][0]) {
+      char lvpath[64];
+      snprintf(lvpath, sizeof(lvpath), "A:/%s_thinking.png", k_agents[ai]);
+      lv_image_set_src(s_img, lvpath);
+      lv_obj_clear_flag(s_img, LV_OBJ_FLAG_HIDDEN);
+      return true;
     }
     lv_obj_add_flag(s_img, LV_OBJ_FLAG_HIDDEN);
     return false;
   }
 
   char lvpath[64];
-  snprintf(lvpath, sizeof(lvpath), "A:/%s/%s.png", s_agents[di], pl_status_name(st));
+  snprintf(lvpath, sizeof(lvpath), "A:/%s_%s.png", k_agents[ai], status_name(st));
   lv_image_set_src(s_img, lvpath);
   lv_obj_clear_flag(s_img, LV_OBJ_FLAG_HIDDEN);
   return true;
@@ -174,7 +156,7 @@ bool pet_assets_show(pl_status_t st, bool on, const char *agent)
 
 void pet_assets_move(int cx, int cy)
 {
-  if (s_img) lv_obj_set_pos(s_img, cx - PNG_DISPLAY, cy - PNG_DISPLAY);
+  if (s_img) lv_obj_set_pos(s_img, cx - PNG_DISPLAY / 2, cy - PNG_DISPLAY / 2);
 }
 
 #endif /* CONFIG_PETLINK_UI_PNG */

@@ -1,12 +1,12 @@
 ﻿/**
- * PNG 素材槽头文件——支持按 agent 分目录（agent/status.png）。
+ * PNG 素材槽头文件——支持按 agent 区分（平铺文件名，fatfsgen 兼容）。
  *
- * 约定：
- *   A:/<agent>/<status>.png  例如 A:/codex/thinking.png, A:/claude/working.png
- *   agent="codex-cli" 或 "codex:" 前缀 → 目录 "codex"
- *   agent="claude-code" 或 "claude" → 目录 "claude"
- *   空/未知 agent → 目录 "default"
- *   CONNECTING 复用同目录下的 thinking.png
+ * 文件名约定：
+ *   A:/<agent>_<status>.png  例如 A:/codex_thinking.png, A:/claude_working.png
+ *   agent="codex-cli" 或 "codex:" 前缀 → 前缀 "codex"
+ *   agent="claude-code" 或 "claude" → 前缀 "claude"
+ *   空/未知 agent → 前缀 "default"
+ *   CONNECTING 复用同前缀的 _thinking.png
  *
  * 缺失/失败全程矢量兜底。
  */
@@ -23,16 +23,9 @@
 
 #if CONFIG_PETLINK_UI_PNG
 
-/** 挂载 asset 分区 + 建隐藏 lv_image */
 void pet_assets_init(lv_obj_t *parent);
-/** 该态 PNG 是否就位（乐观回答：只要任意 agent/dir 有图就 true） */
 bool pet_assets_has(pl_status_t st);
-/**
- * 按 agent 选择目录切换 PNG。
- * @returns true=实际显示了 PNG，false=没显示（调用方应回退矢量狗）
- */
 bool pet_assets_show(pl_status_t st, bool on, const char *agent);
-/** anim_step 每拍同步宠物中心 */
 void pet_assets_move(int cx, int cy);
 
 #else

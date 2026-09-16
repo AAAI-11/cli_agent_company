@@ -647,10 +647,12 @@ static void ui_tick(lv_timer_t *tmr)
   anim_step(snap.state, now);
 
   static pl_status_t last = (pl_status_t)-1;
+  static char last_agent[PL_AGENT_LEN] = "";
   static char last_sess[16] = "";
-  if (snap.state != last) {
+  if (snap.state != last || strcmp(snap.agent, last_agent) != 0) {
     apply_state(snap.state, &snap);
     last = snap.state;
+    snprintf(last_agent, sizeof(last_agent), "%s", snap.agent);
   }
   if (strcmp(snap.session, last_sess) != 0) {
     char top[16];
