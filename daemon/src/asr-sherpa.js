@@ -13,6 +13,22 @@ var MODEL_DIR = process.env.PETLINK_SHERPA_MODEL || path.resolve(__dirname, '..'
 var RECOGNIZER = null;
 var SHERPA = null;
 
+// 加载期可用性探测：npm 包 + 模型四件套缺一即不可用。server.js 靠"导出
+// transcribe=null"触发 whisper 回退——探测放调用期会让回退链变死代码
+// （模块本身总能加载成功）。缺依赖只告警一次，不拖垮 daemon。
+function probeAvailable() {
+  try { require('sherpa-onnx-node'); } catch (e) { return false; }
+  var need = [
+    path.join(MODEL_DIR, 'encoder-epoch-99-avg-1.onnx'),
+    path.join(MODEL_DIR, 'decoder-epoch-99-avg-1.onnx'),
+    path.join(MODEL_DIR, 'joiner-epoch-99-avg-1.onnx'),
+    path.join(MODEL_DIR, 'tokens.txt'),
+  ];
+  for (var i = 0; i < need.length; i++) if (!fs.existsSync(need[i])) return false;
+  return true;
+}
+var AVAILABLE = probeAvailable();
+
 function getRecognizer(logfn) {
   if (RECOGNIZER) return RECOGNIZER;
   try {
@@ -64,4 +80,4 @@ async function transcribe(opts) {
   }
 }
 
-module.exports = { transcribe: transcribe };
+module.exports = { transcribe: AVAILABLE ? transcribe : null };

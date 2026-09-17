@@ -29,11 +29,11 @@ let transcribe = null;
 let asrBackend = 'none';
 try {
   ({ transcribe } = require('./asr-sherpa'));
-  asrBackend = 'sherpa';
+  if (!transcribe) log('ASR sherpa 不可用（未装 npm 包或模型缺失）→ 回退 whisper');
 } catch(e) {}
 if (!transcribe) {
   try { ({ transcribe } = require('./whisper')); asrBackend = 'whisper'; } catch(e) {}
-}
+} else asrBackend = 'sherpa';
 
 const args = process.argv.slice(2);
 const OPTS = {
