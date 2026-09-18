@@ -39,7 +39,13 @@ static const char *TAG = "pet_ui";
 #define DISP_H          480
 #define RASTER_W        480                /* 面板物理扫描：480 列×640 行，不可改 */
 #define RASTER_H        640
-#define PET_UI_ROT_CW   1                  /* 模块顺时针转 90° 安装；0=逆时针 */
+/* 模块 90° 安装方向：默认顺时针（=1）。装配反装 180°（2026-09-18 组装发现，
+ * Kconfig PETLINK_LCD_FLIP_180）在数学上等价于逆时针——走 #else 转置分支 */
+#if defined(CONFIG_PETLINK_LCD_FLIP_180) && CONFIG_PETLINK_LCD_FLIP_180
+#define PET_UI_ROT_CW   0
+#else
+#define PET_UI_ROT_CW   1
+#endif
 #define DRAW_BUF_LINES  64                 /* 官方例程取 V_RES/10 */
 #define TICK_PERIOD_MS  2
 #define UI_TICK_MS      33                 /* ~30fps 的界面节拍 */

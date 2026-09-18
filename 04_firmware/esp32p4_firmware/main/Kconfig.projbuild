@@ -86,10 +86,11 @@ menu "PetLink"
             bool "屏幕 180° 翻转（物理反装补偿）"
             default y
             help
-                复刻底板装配后屏物理朝向反了（2026-09-18 组装发现），固件
-                经 MADCTL(0x36)=0xC0 让面板硬件翻转 MY|MX，零 CPU 开销。
-                正确安装的屏（如换壳/换板）改 n 即回正向。若某些批次面板
-                不认硬转，回退方案是 LVGL 软转 lv_display_set_rotation(180)。
+                复刻底板装配后屏物理朝向反了（2026-09-18 组装发现）。实现：
+                pet_ui.c 的 raster 转置方向 CW→CCW（180° 反装在数学上等价
+                于逆时针 90° 安装），纯下标翻转，零额外开销。曾试过面板级
+                MADCTL(0x36)=0xC0 硬转，这块 WLK2802 不认（烧录实测），
+                已从初始化序列撤除。正确安装的屏改 n 即回正向。
 
         config PETLINK_LCD_RST_GPIO
             int "LCD 复位脚 GPIO（-1=无 RST 脚，走软复位）"
