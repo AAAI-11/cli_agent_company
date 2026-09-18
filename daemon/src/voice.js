@@ -14,10 +14,11 @@
 
 const { spawn, execFileSync } = require('child_process');
 
-/* 哪些状态值得念：thinking/working 太吵不念；出错/完成/等确认必须喊人 */
-const ANNOUNCE_STATUS = new Set(['waiting_confirm', 'done', 'error']);
+/* 哪些状态值得念：thinking/working 太吵不念；waiting_confirm 不念——喊人的活
+ * 板载 F16 提示音（双高音）干了，电脑再念会盖过演示讲解、且念权限原文像念
+ * 字母（2026-09-18 真机反馈）。电脑只念结果：完成/出错/放行/拒绝 */
+const ANNOUNCE_STATUS = new Set(['done', 'error']);
 const STATUS_PHRASE = {
-  waiting_confirm: '需要确认',
   done: '已完成',
   error: '出错了',
 };
@@ -101,12 +102,11 @@ class Voice {
     return true;
   }
 
-  /** 状态播报：只在状态翻转到"值得念"的态时触发；text 可拼进确认播报 */
+  /** 状态播报：只在状态翻转到"值得念"的态时触发（text 参数保留给调用方，当前不拼入） */
   announceStatus(status, text) {
     if (!this.enabled || !ANNOUNCE_STATUS.has(status) || status === this._lastStatus) return false;
-    this._lastStatus = status; // 翻回同态不重念：working 之间的多个 waiting_confirm 只念一次
-    let phrase = STATUS_PHRASE[status] || status;
-    if (status === 'waiting_confirm' && text) phrase = `需要确认：${text}`;
+    this._lastStatus = status; // 翻回同态不重念：working 之间的多个等待只念一次
+    const phrase = STATUS_PHRASE[status] || status;
     return this._speak(phrase);
   }
 
