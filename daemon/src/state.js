@@ -6,7 +6,6 @@
 
 // hook 事件名 → 五态。映射是架构得分点：新 Agent 只需加一张表。
 const HOOK_MAP = {
-  SessionStart: 'thinking',
   UserPromptSubmit: 'thinking',
   PreToolUse: 'working',
   PostToolUse: 'working',
@@ -23,6 +22,12 @@ const HOOK_MAP = {
 function normalizeHook(body) {
   if (!body || typeof body !== 'object') return null;
   const event = body.event || body.hook_event_name || '';
+
+  // SessionStart 单列：会话开起来 ≠ 开动脑子。开屏/续聊/clear 都会发这条，映成
+  // thinking 会把"开着还没派活"的会话错报成思考中（2026-09-18 真机反馈）。
+  // 归一为 done +「待机」：星轨亮相，UserPromptSubmit 才进 thinking
+  if (event === 'SessionStart') return { status: 'done', text: '待机' };
+
   let status = HOOK_MAP[event];
 
   // Notification 语义消歧：notif（测试 curl）/ notification_type（petlink-hook

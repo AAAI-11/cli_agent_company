@@ -32,3 +32,4 @@ managed_components/
 *.log
 tmp/
 temp/
+04_firmware/esp32p4_firmware/.cache/

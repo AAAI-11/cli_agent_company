@@ -110,8 +110,9 @@ static void ui_on_hello_ok(const char *daemon_ver, void *ctx)
   ESP_LOGI(TAG, "[ui] 握手完成 daemon=%s", daemon_ver);
   pet_ui_link(true);
   pet_ui_snap_t snap = {
-    .state = PL_ST_DONE,
+    .state = PL_ST_DONE,   /* 无会话门面：星轨 +「待机」（与浏览器 hello_ok 口径一致） */
     .link_live = true,
+    .text = "待机",
   };
   pet_ui_push(&snap);
 }

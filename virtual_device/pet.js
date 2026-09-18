@@ -86,6 +86,7 @@ function connect() {
       case 'hello_ok':
         ui.connected = true;
         setConn(true, `握手成功 ${m.echo}@${m.daemon_ver}`);
+        if (!ui.session) { ui.status = 'done'; ui.text = '待机'; } // daemon 无会话可重放：门面=待机（与固件 hello_ok 推送同口径）
         break;
       case 'state':
         ui.status = STATE_STYLE[m.status] ? m.status : 'thinking';
