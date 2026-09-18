@@ -44,7 +44,8 @@ function normalizeHook(body) {
   return { status, text };
 }
 
-const SESSION_TTL_MS = 60 * 1000;        // done/error 会话保留 60s（对应 v3.0 F02R 语义）
+const SESSION_TTL_MS = 180 * 1000;       // done/error 会话保留 3min（v3.0 定 60s，2026-09-18 调宽：
+                                       // 演示节奏里"任务完→讲解→开下一会话"常超 1 分钟，气泡提前退场像功能坏了）
 const ACTIVE_STALE_MS = 10 * 60 * 1000; // thinking/working/waiting_confirm 兜底 TTL：
 // 活跃会话每个工具调用都有 hook 刷新 updated，唯一合法长间隔 = 单个长命令执行；
 // waiting_confirm 的真授权窗口只有 35s（hooks 超时回落），超过 10 分钟必是
