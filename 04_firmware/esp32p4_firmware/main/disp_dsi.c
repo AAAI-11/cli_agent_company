@@ -74,6 +74,12 @@ static const st7701_lcd_init_cmd_t k_wlk_2802_init_cmds[] = {
   {0xEF, (uint8_t[]){0x10, 0x0D, 0x04, 0x08, 0x3F, 0x1F}, 6, 0},
   /* 收尾：关 Command2 → 退睡眠（等 120ms）→ 开显示（等 20ms） */
   {0xFF, (uint8_t[]){0x77, 0x01, 0x00, 0x00, 0x00}, 5, 0},
+#if defined(CONFIG_PETLINK_LCD_FLIP_180) && CONFIG_PETLINK_LCD_FLIP_180
+  /* 装配反装补偿（2026-09-18）：MADCTL MY|MX = 180° 面板硬件翻转，零 CPU。
+     MY=0x80 MX=0x40 是 ST7701 数据手册标准位（抄数值）；须在退睡眠前发。
+     真机若不生效的回退方案：LVGL 软转 lv_display_set_rotation(180)。 */
+  {0x36, (uint8_t[]){0xC0}, 1, 0},
+#endif
   {0x11, (uint8_t[]){0x00}, 1, 120},
   {0x29, (uint8_t[]){0x00}, 1, 20},
 };
